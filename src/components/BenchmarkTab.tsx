@@ -8,6 +8,10 @@ import { BenchmarkRun, Span, SpanProvider, spanMs } from '../types/spans';
 // Runs are saved so they can be compared. Admins are not charged points.
 
 type Style = 'library' | 'free';
+type PlanModel = 'sonnet' | 'haiku';
+
+/** The Claude model that wrote the plan or the free-style code (from its span). */
+const claudeModelOf = (spans: Span[]) => String(spans.find(s => s.provider === 'claude' && s.meta?.model)?.meta?.model ?? '');
 
 const LIMIT_MS: Record<Style, number> = { library: 15 * 60_000, free: 60 * 60_000 };
 const POLL_MS = 3000;
@@ -129,6 +133,7 @@ export const Waterfall: React.FC<{ spans: Span[]; now?: number }> = ({ spans, no
 export const BenchmarkTab: React.FC = () => {
   const [idea, setIdea] = useState('');
   const [style, setStyle] = useState<Style>('library');
+  const [planModel, setPlanModel] = useState<PlanModel>('sonnet');
   const [running, setRunning] = useState(false);
   const [spans, setSpans] = useState<Span[]>([]);
   const [step, setStep] = useState<string | null>(null);
@@ -176,7 +181,7 @@ export const BenchmarkTab: React.FC = () => {
       setStep('توليد الصوت');
       const job = await api<{ id: string }>('/api/motion/jobs', {
         method: 'POST',
-        body: JSON.stringify({ script: s.script, title: s.title, voice: 'Charon', formats: ['vertical'], dialect: 'levantine', tone: 'educational_tutor', style, look: 'classic' }),
+        body: JSON.stringify({ script: s.script, title: s.title, voice: 'Charon', formats: ['vertical'], dialect: 'levantine', tone: 'educational_tutor', style, look: 'classic', planModel }),
       });
       jobId = job.id;
 
@@ -238,6 +243,16 @@ export const BenchmarkTab: React.FC = () => {
               <option value="library">نسق جاهز</option>
               <option value="free">نسق حر (أبطأ)</option>
             </select>
+            <select
+              value={planModel}
+              onChange={e => setPlanModel(e.target.value as PlanModel)}
+              disabled={running}
+              title="موديل Claude الذي يكتب خطة المشاهد"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 disabled:opacity-50"
+            >
+              <option value="sonnet">Claude Sonnet</option>
+              <option value="haiku">Claude Haiku (أسرع وأرخص)</option>
+            </select>
             {running ? (
               <button type="button" onClick={() => (cancelled.current = true)} className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-sm font-bold flex items-center gap-1.5 whitespace-nowrap">
                 <StopCircle className="w-4 h-4" /> إيقاف
@@ -280,6 +295,7 @@ export const BenchmarkTab: React.FC = () => {
                   <th className={th}>الوقت</th>
                   <th className={th}>الفكرة</th>
                   <th className={th}>النتيجة</th>
+                  <th className={th}>الموديل</th>
                   <th className={th}>المدة</th>
                   <th className={th}>التكلفة</th>
                   <th className={th}>أبطأ مرحلة</th>
@@ -293,6 +309,7 @@ export const BenchmarkTab: React.FC = () => {
                       <td className={`${td} text-slate-400`}>{r.createdAt}</td>
                       <td className={`${td} max-w-[16rem] truncate text-slate-200`}>{r.idea || '—'}</td>
                       <td className={td}>{r.status === 'done' ? <span className="text-emerald-400">✓ تم</span> : <span className="text-rose-400" title={r.error ?? ''}>✗ فشل</span>}</td>
+                      <td className={`${td} text-violet-300`} dir="ltr">{claudeModelOf(r.spans).replace(/^claude-/, '') || '—'}</td>
                       <td className={`${td} tabular-nums`}>{fmtMs(r.totalMs)}</td>
                       <td className={`${td} tabular-nums text-amber-200`}>{fmtUsd(r.totalCostUsd)}</td>
                       <td className={`${td} text-slate-300`}>{s.slowest ? `${s.slowest.label} (${fmtMs(spanMs(s.slowest))})` : '—'}</td>

@@ -244,6 +244,8 @@ export function createMotionRouter(deps: MotionDeps) {
         look: b.look === 'notebook' ? 'notebook' : 'classic',
         // Where to render (admins only: Lambda is billed to the AWS account); testers get the worker's default
         renderer: req.user!.role === 'admin' && (b.renderer === 'local' || b.renderer === 'lambda') ? b.renderer : undefined,
+        // Claude model for the scene plan (admins comparing models in the performance test); the worker's default otherwise
+        planModel: req.user!.role === 'admin' && ['sonnet', 'haiku', 'opus'].includes(b.planModel) ? b.planModel : undefined,
         title: b.title ? String(b.title).slice(0, 100) : undefined,
         createdAt: Date.now(),
       }));
