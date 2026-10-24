@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
-  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard
+  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical
 } from 'lucide-react';
 import { AuthUser, formatCredits } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
@@ -10,9 +10,10 @@ import { ModerationTab } from './ModerationTab';
 import { CustomVoicesTab } from './CustomVoicesTab';
 import { MotionTab } from './MotionTab';
 import { SmtpCard } from './SmtpCard';
+import { BenchmarkTab } from './BenchmarkTab';
 import { PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
 
-type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings';
+type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark';
 
 interface UsageSummary {
   feature: 'tts' | 'dialogue' | 'tashkeel' | 'optimize' | 'script';
@@ -132,6 +133,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
     { id: 'motion', label: 'موشن جرافيك', icon: Clapperboard },
     { id: 'moderation', label: 'الرقابة على المحتوى', icon: ShieldAlert },
     { id: 'settings', label: 'الإعدادات والتسعير', icon: Settings },
+    { id: 'benchmark', label: 'اختبار الأداء', icon: FlaskConical },
   ];
 
   return (
@@ -164,6 +166,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
       {tab === 'voices' && <CustomVoicesTab />}
       {tab === 'motion' && <MotionTab admin />}
       {tab === 'moderation' && <ModerationTab />}
+      {tab === 'benchmark' && <BenchmarkTab />}
       {tab === 'settings' && (
         <div className="space-y-4">
           <SettingsTab />
