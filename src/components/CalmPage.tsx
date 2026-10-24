@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AudioTagBar } from './AudioTagBar';
-import { Download, Leaf, Loader2, Pause, Play, Share2, Wand2 } from 'lucide-react';
+import { Book, Download, Leaf, Loader2, Pause, Play, Share2, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
 import { AuthUser } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
 import { stripAudioTags } from '../utils/audioTags';
 import { CALM_FONTS, CalmFont, calmFont } from '../data/calmFonts';
 import { DAY_ART, DECOR_GRADIENT, STICKER_ICONS, STICKER_LOOKS, STICKER_THEMES, stickerLayout, vowelled } from '../data/calmStickers';
+import { DEFAULT_RECITER, QURAN_RECITERS } from '../data/quran';
+import { QuranChoice, QuranPicker } from './QuranPicker';
 
 // "Calm reels": gentle vertical videos — real nature scenes, a slow calm voice and large captions — for people
 // going through hard times. Texts stay modest (a quiet moment, not a treatment); scenes are filtered on the server.
@@ -143,6 +145,10 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
   const [text, setText] = useState(TEMPLATES[0].text);
   const [title, setTitle] = useState(TEMPLATES[0].title);
   const [voiceId, setVoiceId] = useState('Sulafat');
+  // Quran reel: chosen whole verses in a reciter's voice (replaces the text and the AI voice)
+  const [quran, setQuran] = useState<QuranChoice | null>(null);
+  const [quranOpen, setQuranOpen] = useState(false);
+  const [reciter, setReciter] = useState(DEFAULT_RECITER);
   const [scene, setScene] = useState('forest');
   const [clips, setClips] = useState<Clip[]>([]);
   const [loadingClips, setLoadingClips] = useState(false);
@@ -212,6 +218,7 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
   const chooseTemplate = (id: string) => {
     const t = TEMPLATES.find(x => x.id === id)!;
     setTemplateId(id);
+    setQuran(null);
     setText(t.text);
     setTitle(t.title);
   };
@@ -232,7 +239,7 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
   const create = async () => {
     setError(null);
     if (!user) return onLoginRequired('سجّل حساباً لتصنع ريلز السكينة.');
-    if (!text.trim()) return setError({ text: 'اكتب نص الريل أو اختر قالباً' });
+    if (!quran && !text.trim()) return setError({ text: 'اكتب نص الريل أو اختر قالباً' });
     if (chosen.length === 0) return setError({ text: 'اختر مشهداً واحداً على الأقل (حتى ثلاثة)' });
     setBusy(true);
     setProgress(0);
@@ -242,7 +249,10 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
       const res = await fetch('/api/calm/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, title, voiceId, clipIds: chosen, supportCard: supportOn ? support : '', style, sticker }),
+        body: JSON.stringify({
+          ...(quran ? { quran: { surah: quran.surah, start: quran.start, end: quran.end, reciter: quran.reciter } } : { text, voiceId }),
+          title, clipIds: chosen, supportCard: supportOn ? support : '', style, sticker,
+        }),
       });
       const job = await res.json().catch(() => ({}));
       if (typeof job.balance === 'number') onBalance(job.balance);
@@ -306,17 +316,43 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
       <div className={section}>
         <div className={label}>{stepNo(1)} الكلمات</div>
         <div className="flex flex-wrap gap-2">
-          {TEMPLATES.map(t => <button key={t.id} type="button" onClick={() => chooseTemplate(t.id)} className={chip(templateId === t.id)}>{t.label}</button>)}
-          <button type="button" onClick={() => { setTemplateId('custom'); setText(''); setTitle(''); }} className={chip(templateId === 'custom')}>نص من عندي</button>
+          {TEMPLATES.map(t => <button key={t.id} type="button" onClick={() => chooseTemplate(t.id)} className={chip(!quran && templateId === t.id)}>{t.label}</button>)}
+          <button type="button" onClick={() => { setTemplateId('custom'); setQuran(null); setText(''); setTitle(''); }} className={chip(!quran && templateId === 'custom')}>نص من عندي</button>
+          <button type="button" onClick={() => (user ? setQuranOpen(true) : onLoginRequired('سجّل حساباً لتختار آيات بصوت القارئ.'))} className={`${chip(!!quran)} flex items-center gap-1.5`}>
+            <Book className="w-3.5 h-3.5" /> آيات بصوت القارئ
+          </button>
         </div>
-        <AudioTagBar target={textBox} value={text} onChange={v => setText(v.slice(0, 1200))} />
-        <textarea ref={textBox} value={text} onChange={e => setText(e.target.value.slice(0, 1200))} rows={5} placeholder="اكتب كلمات هادئة… النقاط الثلاث (...) تعطي وقفة أطول في الصوت" className={`${input} leading-loose`} />
-        <input value={title} onChange={e => setTitle(e.target.value.slice(0, 60))} placeholder="عنوان صغير أعلى الفيديو (اختياري)" className={input} />
-        <p className="text-[11px] text-slate-500">المدة التقريبية للصوت: {estimateDuration(text, 0.9).formatted}</p>
+        {quran ? (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-2">
+            <p className="text-lg text-white leading-loose" style={{ fontFamily: "'Amiri', serif" }}>
+              {quran.verses.map(v => <span key={v.verse}>{v.text} <span className="text-emerald-300 text-base">﴿{v.verse}﴾</span> </span>)}
+            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+              <span>سورة {quran.surahName} • {quran.start === quran.end ? `الآية ${quran.start}` : `الآيات ${quran.start} إلى ${quran.end}`}</span>
+              <span className="flex gap-3">
+                <button type="button" onClick={() => setQuranOpen(true)} className="text-emerald-300 hover:underline">تغيير</button>
+                <button type="button" onClick={() => setQuran(null)} className="text-slate-400 hover:underline">إلغاء</button>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <AudioTagBar target={textBox} value={text} onChange={v => setText(v.slice(0, 1200))} />
+            <textarea ref={textBox} value={text} onChange={e => setText(e.target.value.slice(0, 1200))} rows={5} placeholder="اكتب كلمات هادئة… النقاط الثلاث (...) تعطي وقفة أطول في الصوت" className={`${input} leading-loose`} />
+          </>
+        )}
+        <input value={title} onChange={e => setTitle(e.target.value.slice(0, 60))} placeholder={quran ? 'العنوان (اتركه فارغاً ليُكتب اسم السورة والآيات)' : 'عنوان صغير أعلى الفيديو (اختياري)'} className={input} />
+        {!quran && <p className="text-[11px] text-slate-500">المدة التقريبية للصوت: {estimateDuration(text, 0.9).formatted}</p>}
       </div>
 
       <div className={section}>
         <div className={label}>{stepNo(2)} الصوت</div>
+        {quran ? (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-2.5">
+            <span className="text-sm text-white">تلاوة الشيخ {QURAN_RECITERS.find(r => r.id === quran.reciter)?.name}</span>
+            <button type="button" onClick={() => setQuranOpen(true)} className="text-xs text-emerald-300 hover:underline">تغيير القارئ</button>
+          </div>
+        ) : (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {CALM_VOICES.map(v => (
             <div key={v.id} role="button" tabIndex={0} onClick={() => setVoiceId(v.id)}
@@ -329,7 +365,8 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
             </div>
           ))}
         </div>
-        <p className="text-[11px] text-slate-500">الصوت يُسجَّل تلقائياً بنبرة هادئة وأبطأ قليلاً.</p>
+        )}
+        <p className="text-[11px] text-slate-500">{quran ? 'التلاوة الأصلية للقارئ كما هي، بلا أي تعديل على الصوت.' : 'الصوت يُسجَّل تلقائياً بنبرة هادئة وأبطأ قليلاً.'}</p>
       </div>
 
       <div className={section}>
@@ -527,7 +564,23 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
       <button type="button" onClick={create} disabled={busy} className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-base disabled:opacity-60">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />} اصنع الريل
       </button>
-      <p className="text-[11px] text-slate-500 text-center">يُخصم من رصيدك مدة الصوت فقط. تجهيز الفيديو مجاني.</p>
+      <p className="text-[11px] text-slate-500 text-center">{quran ? 'ريل الآيات لا يُخصم من رصيدك: التلاوة والفيديو مجانيان.' : 'يُخصم من رصيدك مدة الصوت فقط. تجهيز الفيديو مجاني.'}</p>
+
+      {quranOpen && (
+        <QuranPicker
+          reciter={reciter}
+          onReciter={id => { setReciter(id); setQuran(q => (q ? { ...q, reciter: id } : q)); }}
+          onPick={c => {
+            setQuran(c);
+            setReciter(c.reciter);
+            setQuranOpen(false);
+            setTitle('');
+            // Amiri draws the Uthmani script and its stop signs well
+            setStyle(st => ({ ...st, font: 'amiri' }));
+          }}
+          onClose={() => setQuranOpen(false)}
+        />
+      )}
     </div>
   );
 };

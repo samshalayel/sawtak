@@ -11,7 +11,7 @@ dotenv.config();
 // Loaded after dotenv so ADMIN_EMAIL / DATA_DIR from .env are visible at module init
 const { authRouter, loadUser, requireAuth, requireVerifiedEmail, createRateLimiter } = await import('./server/auth.ts');
 const { adminRouter, motionStatsRouter } = await import('./server/admin.ts');
-const { getSettings } = await import('./server/db.ts');
+const { getSettings, getUserById } = await import('./server/db.ts');
 const {
   estimateSeconds, pcmSeconds, reserveCredits, releaseCredits, settleTtsCharge, logUsage,
   InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND
@@ -30,6 +30,7 @@ const { renderPressVideo } = await import('./server/press-video.ts');
 const { newUploadPath, uploadPath, probeVideo, renderOverlayVideo, isOverlayFont, OVERLAY_MAX_SECONDS, OVERLAY_MAX_BYTES } = await import('./server/press-overlay.ts');
 const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
+const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { moderateFull, BLOCKED_MESSAGE } = await import('./server/moderation.ts');
 const { jawwalRouter } = await import('./server/jawwal.ts');
 
@@ -977,22 +978,47 @@ app.post('/api/press/overlay/render', requireAuth, requireVerifiedEmail, async (
 // ---------- Calm reels: nature footage + a calm voice + captions (see server/calm.ts) ----------
 
 app.use('/api/calm', calmRouter);
+app.use('/api/quran', quranRouter);
 app.use('/api/jawwal', jawwalRouter);
 
 app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res) => {
   const body = req.body ?? {};
-  const text = String(body.text || '').trim().slice(0, 1200);
-  const title = String(body.title || '').trim().slice(0, 60);
+  let text = String(body.text || '').trim().slice(0, 1200);
+  let title = String(body.title || '').trim().slice(0, 60);
   const supportCard = String(body.supportCard || '').trim().slice(0, 200);
   const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Sulafat';
   const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
   const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
-  if (!text) return res.status(400).json({ success: false, error: 'اكتب نص الريل أو اختر قالباً' });
+  // A Quran reel uses a reciter's recitation of whole verses instead of the AI voice (see server/quran.ts)
+  const quranPick = body.quran ? await parseQuranPick(body.quran).catch(() => ({ error: 'تعذّر قراءة السورة، حاول بعد قليل' })) : null;
+  if (quranPick && 'error' in quranPick) return res.status(400).json({ success: false, error: quranPick.error });
+  if (!text && !quranPick) return res.status(400).json({ success: false, error: 'اكتب نص الريل أو اختر قالباً' });
   if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
   const sticker = clampSticker(body.sticker);
-  if (!(await passesModeration(req, res, [title, text, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
+  if (!(await passesModeration(req, res, [title, quranPick ? '' : text, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
+  }
+
+  if (quranPick) {
+    let recitation;
+    try {
+      recitation = await quranRecitation(quranPick);
+    } catch (err) {
+      if (err instanceof QuranTooLongError) {
+        return res.status(400).json({ success: false, error: `التلاوة ${Math.round(err.seconds)} ثانية، والحد 3 دقائق. اختر آيات أقل.` });
+      }
+      return sendFriendlyError(res, err, 'Quran recitation');
+    }
+    text = recitation.captions.map(c => c.text).join(' ');
+    if (!title) title = recitation.title;
+    // No AI voice, so nothing is charged
+    const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
+    videoJobs.set(job.id, job);
+    startCalmRender(job, {
+      clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+    });
+    return res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
   }
 
   // The calm voice is generated now (charged like any generation) so a balance problem is reported immediately
@@ -1030,8 +1056,16 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
 
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
-  renderCalmReel({
+  startCalmRender(job, {
     clips: clips as any, voice: wav, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+  });
+  res.status(202).json({ success: true, jobId: job.id, balance });
+});
+
+/** Queues a calm reel and follows it on the job (both the AI-voice and the Quran reel). */
+function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCalmReel>[0], 'onStart' | 'onProgress'>) {
+  renderCalmReel({
+    ...options,
     onStart: () => { job.status = 'rendering'; },
     onProgress: f => { job.progress = f; },
   }).then(mp4 => {
@@ -1046,8 +1080,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
       job.error = 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.';
     }
   });
-  res.status(202).json({ success: true, jobId: job.id, balance });
-});
+}
 
 app.get('/api/video/jobs/:id', requireAuth, (req, res) => {
   const job = videoJobs.get(req.params.id);

@@ -109,6 +109,8 @@ export interface CalmRenderOptions {
   clips: Clip[];
   voice: Buffer;          // the calm voice (WAV)
   text: string;           // captions
+  /** Quran reels: one entry per verse with its exact span in `voice` (seconds); replaces the timing guessed from text. */
+  verses?: { text: string; start: number; end: number }[];
   title: string;          // optional line at the top
   supportCard: string;    // optional closing card text (empty = none)
   domain: string;
@@ -186,9 +188,52 @@ async function dayArt(day: number, themeId: string, maxW: number, maxH: number) 
 }
 
 function timeCaptions(text: string, wav: Buffer, offset: number) {
-  const chunks = captionChunks(text);
   const { intervals, duration } = speechIntervals(wav);
-  const speech = intervals.length ? intervals : [[0, duration] as [number, number]];
+  return spreadOverSpeech(captionChunks(text), intervals.length ? intervals : [[0, duration]], offset);
+}
+
+// Waqf (stop) signs in the Uthmani text: a good place to break a verse into caption lines
+const STOP_MARK = /[ۖ-ۜ]/;
+const ARABIC_LETTER = /[ء-يٱ-ۓ]/;
+
+/** A verse in short caption lines: up to 6 words (7 when the 7th ends at a stop sign), broken after a stop sign once
+ *  a line has 3; stop signs and other standalone marks stay with the word before them, and a single leftover word
+ *  joins the line before. */
+export function verseChunks(text: string): string[] {
+  const words: string[] = [];
+  for (const t of text.split(/\s+/).filter(Boolean)) {
+    if (!ARABIC_LETTER.test(t) && words.length) words[words.length - 1] += ` ${t}`;
+    else words.push(t);
+  }
+  const chunks: string[] = [];
+  let line: string[] = [];
+  for (const [i, w] of words.entries()) {
+    line.push(w);
+    const nextEndsAtStop = line.length === 6 && STOP_MARK.test(words[i + 1] ?? '');
+    if ((line.length >= 6 && !nextEndsAtStop) || (line.length >= 3 && STOP_MARK.test(w))) {
+      chunks.push(line.join(' '));
+      line = [];
+    }
+  }
+  if (line.length === 1 && chunks.length) chunks[chunks.length - 1] += ` ${line[0]}`;
+  else if (line.length) chunks.push(line.join(' '));
+  return chunks;
+}
+
+/** Quran captions: every verse keeps its own span from the recitation; inside it the lines follow the reciter's sound. */
+function verseCaptions(verses: NonNullable<CalmRenderOptions['verses']>, wav: Buffer, offset: number) {
+  const { intervals } = speechIntervals(wav);
+  return verses.flatMap(v => {
+    const inside = intervals
+      .map(([a, b]) => [Math.max(a, v.start), Math.min(b, v.end)] as [number, number])
+      .filter(([a, b]) => b - a > 0.05);
+    return spreadOverSpeech(verseChunks(v.text), inside.length ? inside : [[v.start, v.end]], offset)
+      .map(c => ({ ...c, end: Math.min(c.end, v.end + offset + 0.3) }));
+  });
+}
+
+/** Lays caption lines over the speech proportionally to their length (silences are skipped). */
+function spreadOverSpeech(chunks: string[], speech: [number, number][], offset: number) {
   const total = speech.reduce((s, [a, b]) => s + (b - a), 0);
   const weights = chunks.map(c => c.replace(/\s/g, '').length || 1);
   const wTotal = weights.reduce((a, b) => a + b, 0);
@@ -250,7 +295,7 @@ async function textOverlays(o: CalmRenderOptions, voiceStart: number, voiceEnd: 
     out.push({ png: t.png, x: Math.round((W - t.width) / 2), y: Math.max(0, y), start, end, fade });
   };
   if (o.title) await centred(o.title, st.titleSize, W - 120, null, 140, 0.6, voiceEnd, 0.9);
-  for (const c of timeCaptions(o.text, o.voice, voiceStart)) {
+  for (const c of o.verses?.length ? verseCaptions(o.verses, o.voice, voiceStart) : timeCaptions(o.text, o.voice, voiceStart)) {
     await centred(c.text, st.size, W - 110, st.y, 0, c.start, Math.min(c.end, voiceEnd + 0.4), 0.35);
   }
   if (o.supportCard) await centred(o.supportCard, Math.round(st.size * 0.68), W - 140, st.y, 0, voiceEnd + 0.6, total - 0.3, 0.6);
