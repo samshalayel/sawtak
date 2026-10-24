@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <script>
+      // Redesign: the playful light theme is always on
+      document.documentElement.classList.add('light', 'playful');
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Installable app (PWA): manifest is served per domain by the server -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0891b2" />
+    <link rel="icon" type="image/png" href="/icons/favicon-64.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="صوتك الذكي" />
+    <title>صوتك الذكي | استوديو تحويل النص إلى صوت احترافي</title>
+    <meta name="description" content="استوديو متكامل لتحويل النص إلى صوت طبيعي فائق الجودة يدعم لغات ولهجات متعددة مع تحكم كامل بنبرة وسرعة الصوت وميزات الاستوديو الصوتي المتطورة." />
+    <meta property="og:title" content="صوتك الذكي | استوديو تحويل النص إلى صوت احترافي" />
+    <meta property="og:description" content="استوديو متكامل لتحويل النص إلى صوت طبيعي فائق الجودة يدعم لغات ولهجات متعددة مع تحكم كامل بنبرة وسرعة الصوت وميزات الاستوديو الصوتي المتطورة." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+Bhaijaan+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

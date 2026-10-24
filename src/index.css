@@ -1,0 +1,191 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: 'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background-color: #090d16;
+    color: #f1f5f9;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+/* SweetAlert2: right-to-left + studio font */
+.swal-studio {
+  direction: rtl;
+  font-family: inherit;
+  border: 1px solid #1e293b;
+  border-radius: 1rem !important;
+}
+.swal-studio .swal2-confirm {
+  color: #020617 !important;
+  font-weight: 700;
+}
+
+/* ---------- Light mode ----------
+   The UI is styled with dark slate utilities. Tailwind v4 compiles them to CSS variables, so light mode
+   remaps the palette instead of duplicating every class: dark surfaces become light, light text becomes
+   dark, and pale accent text shades are deepened for contrast on white. */
+html.light {
+  color-scheme: light;
+
+  --color-slate-950: oklch(96.8% 0.007 247.896); /* page background (slate-100) */
+  --color-slate-900: oklch(100% 0 0);            /* cards (white) */
+  --color-slate-800: oklch(92.9% 0.013 255.508); /* borders, secondary surfaces (slate-200) */
+  --color-slate-700: oklch(86.9% 0.022 252.894); /* stronger borders (slate-300) */
+  --color-slate-600: oklch(70.4% 0.04 256.788);  /* slate-400 */
+  --color-slate-400: oklch(44.6% 0.043 257.281); /* muted text (slate-600) */
+  --color-slate-300: oklch(37.2% 0.044 257.287); /* labels (slate-700) */
+  --color-slate-200: oklch(27.9% 0.041 260.031); /* body text (slate-800) */
+  --color-slate-100: oklch(20.8% 0.042 265.755); /* main text (slate-900) */
+  --color-slate-50: oklch(12.9% 0.042 264.695);  /* slate-950 */
+  --color-white: oklch(20.8% 0.042 265.755);     /* "text-white" headings become dark */
+
+  --color-amber-200: oklch(47.3% 0.137 46.201);  /* amber-800 */
+  --color-amber-300: oklch(55.5% 0.163 48.998);  /* amber-700 */
+  --color-amber-400: oklch(66.6% 0.179 58.318);  /* amber-600 */
+  --color-emerald-200: oklch(43.2% 0.095 166.913);
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-rose-200: oklch(45.5% 0.188 13.697);
+  --color-rose-300: oklch(51.4% 0.222 16.935);
+  --color-sky-300: oklch(50% 0.134 242.749);
+  --color-blue-300: oklch(48.8% 0.243 264.376);
+}
+
+html.light body {
+  background-color: oklch(96.8% 0.007 247.896);
+  color: oklch(20.8% 0.042 265.755);
+}
+
+/* Dark text on bright buttons (amber/emerald/white) must stay dark in both themes */
+html.light .text-slate-950 {
+  color: oklch(12.9% 0.042 264.695);
+}
+
+/* Real white surfaces stay white (the light theme remaps --color-white to a dark tone for text) */
+html.light .bg-white {
+  background-color: #fff;
+}
+
+/* Softer shadows and modal backdrop on light backgrounds */
+html.light .bg-black\/70 {
+  background-color: rgb(15 23 42 / 0.35);
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.8);
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7);
+}
+
+html.light .swal-studio {
+  border-color: #e2e8f0;
+}
+
+/* =====================================================================
+   Playful redesign (turquoise + candy accents), layered on top of the
+   light theme. Tailwind v4 utilities read these CSS variables, so the
+   whole UI re-skins without touching every component.
+   ===================================================================== */
+html.playful {
+  /* Brand: turquoise. Components use the "amber" utilities for the brand colour,
+     so the amber scale is remapped to turquoise (deeper shades for text on white). */
+  --color-amber-50: #ecfeff;
+  --color-amber-100: #cffafe;
+  --color-amber-200: #0e7490;   /* used as text on light backgrounds */
+  --color-amber-300: #0891b2;   /* accent text */
+  --color-amber-400: #06b6d4;   /* icons, hover backgrounds */
+  --color-amber-500: #06b6d4;   /* primary buttons */
+  --color-amber-600: #0891b2;
+  --color-amber-700: #0e7490;
+  --color-orange-500: #8b5cf6;  /* gradients: turquoise -> violet */
+  --color-orange-600: #7c3aed;
+
+  /* Softer, slightly blue-tinted neutrals */
+  --color-slate-950: #f4fbfd;   /* page */
+  --color-slate-900: #ffffff;   /* cards */
+  --color-slate-800: #e3eef3;   /* borders */
+  --color-slate-700: #cfe0e8;
+
+  /* Rounder everything */
+  --radius-lg: 0.85rem;
+  --radius-xl: 1.15rem;
+  --radius-2xl: 1.6rem;
+
+  --font-sans: 'Baloo Bhaijaan 2', system-ui, sans-serif;
+}
+
+html.playful body {
+  font-family: 'Baloo Bhaijaan 2', system-ui, sans-serif;
+  background:
+    radial-gradient(40rem 40rem at 110% -10%, rgba(6, 182, 212, 0.16), transparent 60%),
+    radial-gradient(34rem 34rem at -15% 30%, rgba(236, 72, 153, 0.10), transparent 60%),
+    radial-gradient(30rem 30rem at 60% 110%, rgba(250, 204, 21, 0.12), transparent 60%),
+    #f4fbfd;
+  background-attachment: fixed;
+}
+
+/* Cards float with a soft turquoise shadow */
+html.playful .rounded-2xl.border,
+html.playful .rounded-xl.border {
+  box-shadow: 0 6px 24px -12px rgba(8, 145, 178, 0.25);
+}
+
+/* Bright buttons: white text on turquoise reads better than dark text */
+html.playful .bg-amber-500.text-slate-950,
+html.playful .bg-amber-500 .text-slate-950,
+html.playful .from-amber-500.text-slate-950 {
+  color: #ffffff;
+}
+
+html.playful ::selection {
+  background: rgba(6, 182, 212, 0.25);
+}
+
+/* Playful helpers used by the landing page */
+.blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(40px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+@keyframes floaty {
+  0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+  50% { transform: translateY(-10px) rotate(var(--r, 0deg)); }
+}
+.floaty {
+  animation: floaty 5s ease-in-out infinite;
+}
+html.playful .from-amber-500 .text-slate-950 {
+  color: #ffffff;
+}
+
+/* Decorative blobs must never create horizontal scrolling */
+html.playful body {
+  overflow-x: hidden;
+}
+
+/* Phones: lock horizontal scrolling so a wide element can never shift the page sideways (RTL) */
+@media (max-width: 639px) {
+  html, body { overflow-x: hidden; max-width: 100%; }
+}

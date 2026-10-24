@@ -1,0 +1,30 @@
+services:
+  sawtik:
+    build: .
+    image: sawtik-ai-tts-studio:latest
+    container_name: sawtik-ai-tts-studio
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.sawtik.rule=Host(`tts.sillar.us`)
+      - traefik.http.routers.sawtik.entrypoints=websecure
+      - traefik.http.routers.sawtik.tls=true
+      - traefik.http.services.sawtik.loadbalancer.server.port=3000
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web:
+    external: true
