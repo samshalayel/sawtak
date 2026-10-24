@@ -9,9 +9,10 @@ import crypto from 'crypto';
 import { ThinkingLevel } from '@google/genai';
 import { requireAuth, requirePermission } from './auth.ts';
 import { withGeminiFailover } from './keys.ts';
-import { logUsage, pcmSeconds, chargePoints, InsufficientCreditsError } from './credits.ts';
-import { getSettings } from './db.ts';
+import { logUsage, pcmSeconds, chargePoints, InsufficientCreditsError, costUsd } from './credits.ts';
+import { getSettings, listBenchmarkRuns, saveBenchmarkRun } from './db.ts';
 import { ALLOWED_AUDIO_TAGS, keepKnownAudioTags } from '../src/utils/audioTags.ts';
+import type { Span } from '../src/types/spans.ts';
 
 const MOTION_DIR = path.join(path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data')), 'motion');
 const MAX_SECONDS = 190; // 3 minutes of voice-over (+ a little slack)
@@ -92,6 +93,15 @@ const ownerOf = (dir: string): number | null => {
   }
 };
 
+/** Moderation timed as a span; it calls Gemini only when the AI check is on (its cost is not logged). */
+async function moderationSpan(deps: MotionDeps, req: express.Request, res: express.Response, text: string): Promise<Span | null> {
+  const { moderationMode, moderationAi } = getSettings();
+  const start = Date.now();
+  if (!(await deps.passesModeration(req, res, text, 'script'))) return null;
+  const ai = moderationMode !== 'off' && moderationAi === 'on';
+  return { name: 'moderation', label: 'فحص المحتوى', provider: ai ? 'gemini' : 'local', start, end: Date.now(), meta: { ai: ai ? 'on' : 'off' } };
+}
+
 /** A job folder the signed-in account may see: its own jobs, or any job for an admin. */
 const ownJobDir = (req: express.Request, id: string) => {
   const dir = jobDir(id);
@@ -114,13 +124,17 @@ export function createMotionRouter(deps: MotionDeps) {
       const audience: Audience = req.body?.audience in AUDIENCES ? req.body.audience : mode === 'curriculum' ? 'students' : 'general';
       if (source.length < 10) return res.status(400).json({ success: false, error: 'اكتب الفكرة أو الصق جزء المنهاج' });
       if (source.length > 12000) return res.status(400).json({ success: false, error: 'النص طويل، اختصره إلى 12 ألف حرف' });
-      if (!(await deps.passesModeration(req, res, source, 'script'))) return;
+      const spans: Span[] = [];
+      const moderation = await moderationSpan(deps, req, res, source);
+      if (!moderation) return;
+      spans.push(moderation);
       // Speed first (2026-10-20): the light model like the press studio; the full text model is only the fallback
       const prompt = scriptPrompt({ source, mode, dialect, minutes, audience });
       let r: { result: any; keyId: number } | null = null;
       let usedModel = '';
       let lastError: unknown;
       for (const { model, thinking } of [{ model: 'gemini-3.5-flash-lite', thinking: ThinkingLevel.MINIMAL }, { model: deps.textModel, thinking: ThinkingLevel.LOW }]) {
+        const start = Date.now();
         try {
           r = await withGeminiFailover('motion-script', client => client.models.generateContent({
             model,
@@ -128,9 +142,12 @@ export function createMotionRouter(deps: MotionDeps) {
             config: { responseMimeType: 'application/json', responseJsonSchema: SCRIPT_SCHEMA, thinkingConfig: { thinkingLevel: thinking }, httpOptions: { timeout: 120_000 } },
           }), { cooldown: false });
           usedModel = model;
+          const tokens = deps.usageTokens(r.result);
+          spans.push({ name: 'script', label: 'كتابة السكربت', provider: 'gemini', start, end: Date.now(), costUsd: costUsd('script', tokens.promptTokens, tokens.outputTokens), meta: { model, inTokens: tokens.promptTokens, outTokens: tokens.outputTokens } });
           break;
-        } catch (err) {
+        } catch (err: any) {
           lastError = err;
+          spans.push({ name: 'script-failed', label: 'كتابة السكربت (فشل، تجربة موديل آخر)', provider: 'gemini', start, end: Date.now(), error: String(err?.message || err).slice(0, 200), meta: { model } });
           console.warn(`[motion] ${model} could not write the script, trying the next model`);
         }
       }
@@ -141,7 +158,7 @@ export function createMotionRouter(deps: MotionDeps) {
       const cleaned = String(parsed.script || '').replace(/[^؀-ۿݐ-ݿ -~ -ÿ\s،؛؟…–—“”«»]/g, '');
       const script = keepKnownAudioTags(cleaned.replace(/[ \t]+/g, ' ').trim());
       if (!script) return res.status(502).json({ success: false, error: 'تعذّرت كتابة السكربت، جرّب مرة أخرى' });
-      res.json({ success: true, title: String(parsed.title || '').trim().slice(0, 100), script });
+      res.json({ success: true, title: String(parsed.title || '').trim().slice(0, 100), script, spans });
     } catch (err: any) {
       console.error('Motion script failed:', err?.message || err);
       res.status(500).json({ success: false, error: 'تعذّرت كتابة السكربت حالياً، يرجى المحاولة لاحقاً.' });
@@ -171,7 +188,10 @@ export function createMotionRouter(deps: MotionDeps) {
           return res.status(429).json({ success: false, error: `وصلت للحد اليومي (${TESTER_DAILY_UNITS} نقاط: الجاهز نقطة، والحر 5). جرّب غداً${styleOf(b.style) === 'free' ? ' أو اختر النسق الجاهز' : ''}.` });
         }
       }
-      if (!(await deps.passesModeration(req, res, [b.title || '', script, b.brief || ''].join('\n'), 'script'))) return;
+      const spans: Span[] = [];
+      const moderation = await moderationSpan(deps, req, res, [b.title || '', script, b.brief || ''].join('\n'));
+      if (!moderation) return;
+      spans.push(moderation);
 
       const style = deps.buildStyleDirective({
         dialect: deps.dialectNames[b.dialect] ? String(b.dialect) : 'levantine',
@@ -179,10 +199,16 @@ export function createMotionRouter(deps: MotionDeps) {
         speed: Number(b.speed) || 1,
         pitch: 0,
       });
+      const ttsStart = Date.now();
       const r = await deps.synthesizeSpeech(script, voice, style);
       if (!r.wav) return res.status(502).json({ success: false, error: 'لم يرجع صوت من الخدمة، جرّب مرة أخرى' });
       const seconds = pcmSeconds(r.wav);
       const tokens = deps.usageTokens(r.response);
+      spans.push({
+        name: 'tts', label: 'توليد الصوت', provider: 'gemini', start: ttsStart, end: Date.now(),
+        costUsd: costUsd('tts', tokens.promptTokens, tokens.outputTokens),
+        meta: { model: deps.ttsModel, voice, audioSeconds: Math.round(seconds * 10) / 10, inTokens: tokens.promptTokens, outTokens: tokens.outputTokens },
+      });
       logUsage({ userId: req.user!.id, feature: 'tts', model: deps.ttsModel, voice, chars: script.length, promptTokens: tokens.promptTokens, outputTokens: tokens.outputTokens, audioSeconds: seconds, apiKeyId: r.keyId });
       if (seconds > MAX_SECONDS) return res.status(400).json({ success: false, error: `الصوت ${Math.round(seconds)} ثانية، والحد 3 دقائق. اختصر السكربت.` });
 
@@ -221,8 +247,8 @@ export function createMotionRouter(deps: MotionDeps) {
         title: b.title ? String(b.title).slice(0, 100) : undefined,
         createdAt: Date.now(),
       }));
-      // status.json last: the worker only picks up a folder once it is complete
-      fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify({ id, state: 'queued', progress: 0, step: 'في الانتظار', outputs: {}, updatedAt: Date.now() }));
+      // status.json last: the worker only picks up a folder once it is complete. The worker appends its own spans.
+      fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify({ id, state: 'queued', progress: 0, step: 'في الانتظار', outputs: {}, spans, updatedAt: Date.now() }));
       res.status(201).json({ success: true, id, seconds: Math.round(seconds) });
     } catch (err: any) {
       console.error('Motion job failed:', err?.message || err);
@@ -264,6 +290,29 @@ export function createMotionRouter(deps: MotionDeps) {
     if (!file || !fs.existsSync(file)) return res.status(404).json({ success: false, error: 'الفيديو غير جاهز' });
     if (req.query.download) res.attachment(`motion-${format}.mp4`);
     res.sendFile(file);
+  });
+
+  // Performance test history (admins only): each run's spans, so runs can be compared over time
+  router.get('/benchmarks', (req, res) => {
+    if (req.user!.role !== 'admin') return res.status(403).json({ success: false, error: 'للمدير فقط' });
+    res.json({ success: true, runs: listBenchmarkRuns(30) });
+  });
+
+  router.post('/benchmarks', (req, res) => {
+    if (req.user!.role !== 'admin') return res.status(403).json({ success: false, error: 'للمدير فقط' });
+    const b = req.body ?? {};
+    const spans = (Array.isArray(b.spans) ? b.spans : [])
+      .filter((s: any) => s && typeof s.name === 'string' && Number.isFinite(s.start) && Number.isFinite(s.end))
+      .slice(0, 200) as Span[];
+    if (!spans.length) return res.status(400).json({ success: false, error: 'لا توجد مراحل لحفظها' });
+    const id = saveBenchmarkRun({
+      idea: String(b.idea || '').slice(0, 500),
+      jobId: typeof b.jobId === 'string' && jobDir(b.jobId) ? b.jobId : null,
+      status: b.status === 'done' ? 'done' : 'error',
+      error: b.error ? String(b.error).slice(0, 500) : null,
+      spans,
+    });
+    res.status(201).json({ success: true, id });
   });
 
   router.delete('/jobs/:id', (req, res) => {

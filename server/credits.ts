@@ -57,7 +57,7 @@ interface UsageInput {
   apiKeyId?: number;
 }
 
-function costUsd(feature: UsageInput['feature'], promptTokens: number, outputTokens: number): number {
+export function costUsd(feature: UsageInput['feature'], promptTokens: number, outputTokens: number): number {
   const s = getSettings();
   const [inPrice, outPrice] = feature === 'tts' || feature === 'dialogue'
     ? [s.ttsInputPricePerM, s.ttsOutputPricePerM]

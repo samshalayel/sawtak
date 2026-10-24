@@ -1,310 +1,309 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { FlaskConical, Loader2, StopCircle } from 'lucide-react';
-import { card } from './adminShared';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FlaskConical, History, Loader2, StopCircle } from 'lucide-react';
+import { api, card, td, th } from './adminShared';
+import { BenchmarkRun, Span, SpanProvider, spanMs } from '../types/spans';
 
-type StepStatus = 'idle' | 'running' | 'done' | 'error';
+// Admin performance test: runs one real motion video (idea -> script -> voice -> worker) and shows every stage as a
+// span on a waterfall: when it started, how long it took, what it cost, and how long it waited for a shared slot.
+// Runs are saved so they can be compared. Admins are not charged points.
 
-interface StepState {
-  status: StepStatus;
-  progress: number;
-  ms: number | null;
-  label: string;
-  icon: string;
-}
+type Style = 'library' | 'free';
 
-const STEPS_INIT: StepState[] = [
-  { status: 'idle', progress: 0, ms: null, label: 'كتابة السكربت', icon: '📝' },
-  { status: 'idle', progress: 0, ms: null, label: 'توليد الصوت',   icon: '🎙️' },
-  { status: 'idle', progress: 0, ms: null, label: 'رندر الفيديو',  icon: '🎬' },
-];
+const LIMIT_MS: Record<Style, number> = { library: 15 * 60_000, free: 60 * 60_000 };
+const POLL_MS = 3000;
 
-const SCRIPT_TIMEOUT_MS  = 3 * 60 * 1000; // 3 min
-const RENDER_TIMEOUT_MS  = 6 * 60 * 1000; // 6 min
+const PROVIDERS: Record<SpanProvider, { label: string; color: string }> = {
+  gemini: { label: 'Gemini', color: '#3b82f6' },
+  aws: { label: 'AWS', color: '#f59e0b' },
+  claude: { label: 'Claude', color: '#a855f7' },
+  local: { label: 'السيرفر', color: '#14b8a6' },
+  wait: { label: 'انتظار', color: '#475569' },
+};
 
 const fmtMs = (ms: number) =>
-  ms >= 60000
-    ? `${Math.floor(ms / 60000)}د ${Math.round((ms % 60000) / 1000)}ث`
-    : `${(ms / 1000).toFixed(1)} ث`;
+  ms >= 60_000 ? `${Math.floor(ms / 60_000)}د ${Math.round((ms % 60_000) / 1000)}ث` : ms >= 1000 ? `${(ms / 1000).toFixed(1)}ث` : `${Math.round(ms)}ms`;
+const fmtUsd = (v: number) => `$${v.toFixed(v > 0 && v < 0.01 ? 4 : 3)}`;
 
-// ── Ring ──────────────────────────────────────────────────────────────────────
+/** Time covered by at least one span (overlaps counted once). */
+function coveredMs(spans: Span[]) {
+  let total = 0;
+  let curStart = -1;
+  let curEnd = -1;
+  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+    if (s.start > curEnd) {
+      if (curEnd > curStart) total += curEnd - curStart;
+      curStart = s.start;
+      curEnd = s.end;
+    } else curEnd = Math.max(curEnd, s.end);
+  }
+  if (curEnd > curStart) total += curEnd - curStart;
+  return total;
+}
 
-const Ring: React.FC<{ step: StepState; size?: number; elapsed?: number }> = ({ step, size = 88, elapsed }) => {
-  const r = (size - 10) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - step.progress / 100);
-  const color =
-    step.status === 'done'    ? '#10b981' :
-    step.status === 'error'   ? '#ef4444' :
-    step.status === 'running' ? '#f59e0b' : '#334155';
+function summarize(spans: Span[], now?: number) {
+  const t0 = spans.length ? Math.min(...spans.map(s => s.start)) : 0;
+  const tEnd = Math.max(now ?? 0, ...spans.map(s => s.end));
+  const total = Math.max(0, tEnd - t0);
+  const work = spans.filter(s => s.provider !== 'wait');
+  const slowest = work.reduce<Span | null>((m, s) => (!m || spanMs(s) > spanMs(m) ? s : m), null);
+  const waitMs = spans.filter(s => s.provider === 'wait').reduce((sum, s) => sum + spanMs(s), 0);
+  const cost = spans.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
+  const estimated = spans.some(s => s.estimated && (s.costUsd ?? 0) > 0);
+  const byProvider = (Object.keys(PROVIDERS) as SpanProvider[])
+    .map(p => ({ p, ms: spans.filter(s => s.provider === p).reduce((sum, s) => sum + spanMs(s), 0), cost: spans.filter(s => s.provider === p).reduce((sum, s) => sum + (s.costUsd ?? 0), 0) }))
+    .filter(x => x.ms > 0);
+  return { t0, total, slowest, waitMs, cost, estimated, byProvider, unmeasured: Math.max(0, total - coveredMs(spans)) };
+}
 
-  const label =
-    step.status === 'idle'    ? '—' :
-    step.status === 'running' ? `${Math.round(step.progress)}%` :
-    step.status === 'done'    ? '✓' : '✗';
+const Stat: React.FC<{ label: string; value: string; hint?: string; tone?: string }> = ({ label, value, hint, tone = 'text-white' }) => (
+  <div className="bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2 min-w-0">
+    <div className="text-[11px] text-slate-400">{label}</div>
+    <div className={`text-base font-extrabold truncate ${tone}`}>{value}</div>
+    {hint && <div className="text-[10px] text-slate-500 truncate">{hint}</div>}
+  </div>
+);
+
+export const Waterfall: React.FC<{ spans: Span[]; now?: number }> = ({ spans, now }) => {
+  const sorted = useMemo(() => [...spans].sort((a, b) => a.start - b.start || a.end - b.end), [spans]);
+  const s = summarize(sorted, now);
+  if (!sorted.length) return null;
+  const pct = (ms: number) => `${(100 * ms) / Math.max(1, s.total)}%`;
 
   return (
-    <div className="flex flex-col items-center gap-1 select-none w-28">
-      <div style={{ position: 'relative', width: size, height: size }}>
-        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e293b" strokeWidth={8} />
-          <circle
-            cx={size/2} cy={size/2} r={r}
-            fill="none" stroke={color} strokeWidth={8}
-            strokeDasharray={circ} strokeDashoffset={offset}
-            strokeLinecap="round"
-            style={{ transition: 'stroke-dashoffset 0.35s ease, stroke 0.3s' }}
-          />
-        </svg>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span className="text-sm font-extrabold text-white">{label}</span>
-        </div>
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <Stat label="الوقت الكلي" value={fmtMs(s.total)} />
+        <Stat label="التكلفة" value={fmtUsd(s.cost)} hint={s.estimated ? 'تشمل أرقام تقديرية' : undefined} tone="text-amber-300" />
+        <Stat label="أبطأ مرحلة" value={s.slowest ? fmtMs(spanMs(s.slowest)) : '—'} hint={s.slowest?.label} tone="text-rose-300" />
+        <Stat label="وقت الانتظار" value={fmtMs(s.waitMs)} hint="طابور وأدوار مشتركة" />
+        <Stat label="وقت غير مقاس" value={fmtMs(s.unmeasured)} hint="بين المراحل" />
       </div>
-      <div className="text-xl mt-1">{step.icon}</div>
-      <div className="text-xs font-semibold text-slate-300 text-center">{step.label}</div>
-      <div className="text-[11px] text-slate-400 min-h-[16px]">
-        {step.ms != null
-          ? fmtMs(step.ms)
-          : step.status === 'running' && elapsed != null
-          ? `⏱ ${fmtMs(elapsed)}`
-          : null}
+
+      <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
+        {s.byProvider.map(({ p, ms, cost }) => (
+          <span key={p} className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: PROVIDERS[p].color }} />
+            {PROVIDERS[p].label}: {fmtMs(ms)}{cost > 0 ? ` · ${fmtUsd(cost)}` : ''}
+          </span>
+        ))}
       </div>
+
+      <div className="border border-slate-800 rounded-xl overflow-hidden">
+        {sorted.map((sp, i) => {
+          const isSlowest = sp === s.slowest;
+          const meta = Object.entries(sp.meta ?? {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
+          return (
+            <div key={i} className={`grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)_4.5rem_4.5rem] items-center gap-2 px-3 py-1.5 text-xs ${i % 2 ? 'bg-slate-950/40' : ''}`} title={[sp.label, meta, sp.error].filter(Boolean).join('\n')}>
+              <div className={`truncate ${sp.provider === 'wait' ? 'text-slate-500' : 'text-slate-200'} ${isSlowest ? 'font-bold text-rose-300' : ''}`}>
+                {sp.error ? '⚠️ ' : ''}{sp.label}
+              </div>
+              {/* The bar runs left to right like a timeline, even in the RTL page */}
+              <div className="relative h-4 bg-slate-950 rounded" dir="ltr">
+                <div
+                  className={`absolute top-0 h-4 rounded ${sp.error ? 'ring-1 ring-rose-500' : ''}`}
+                  style={{
+                    left: pct(sp.start - s.t0),
+                    width: `max(2px, ${pct(spanMs(sp))})`,
+                    background: sp.provider === 'wait'
+                      ? `repeating-linear-gradient(45deg, ${PROVIDERS.wait.color}, ${PROVIDERS.wait.color} 3px, transparent 3px, transparent 6px)`
+                      : PROVIDERS[sp.provider].color,
+                  }}
+                />
+              </div>
+              <div className={`text-left tabular-nums ${isSlowest ? 'text-rose-300 font-bold' : 'text-slate-300'}`} dir="ltr">{fmtMs(spanMs(sp))}</div>
+              <div className="text-left tabular-nums text-amber-200/90" dir="ltr">
+                {sp.costUsd === undefined ? '—' : `${sp.estimated && sp.costUsd > 0 ? '~' : ''}${fmtUsd(sp.costUsd)}`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-slate-500 leading-relaxed">
+        مرّر على أي مرحلة لترى التفاصيل (الموديل، التوكنز، النتيجة). ~ تكلفة تقديرية: Claude على الاشتراك لا يُحاسَب لكل طلب
+        (الرقم هو سعر الـ API المكافئ)، و Transcribe محسوب من سعر الدقيقة. "—" تكلفة غير مقاسة (مثل فحص المحتوى).
+      </p>
     </div>
   );
 };
 
-// ── BenchmarkTab ──────────────────────────────────────────────────────────────
-
 export const BenchmarkTab: React.FC = () => {
-  const [idea, setIdea]     = useState('');
-  const [steps, setSteps]   = useState<StepState[]>(STEPS_INIT.map(s => ({ ...s })));
+  const [idea, setIdea] = useState('');
+  const [style, setStyle] = useState<Style>('library');
   const [running, setRunning] = useState(false);
-  const [activeStep, setActiveStep] = useState<number | null>(null);
-  const [stepStart, setStepStart]   = useState<number | null>(null);
-  const [elapsed, setElapsed]       = useState(0);
-  const [success, setSuccess]       = useState<{ ms: number[] } | null>(null);
-  const [errMsg, setErrMsg]         = useState<string | null>(null);
+  const [spans, setSpans] = useState<Span[]>([]);
+  const [step, setStep] = useState<string | null>(null);
+  const [now, setNow] = useState<number | undefined>(undefined);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [history, setHistory] = useState<BenchmarkRun[]>([]);
+  const [selected, setSelected] = useState<BenchmarkRun | null>(null);
+  const cancelled = useRef(false);
 
-  const abortCtrlRef = useRef<AbortController | null>(null);
-  const tickerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const elapsedRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadHistory = () => api<{ runs: BenchmarkRun[] }>('/api/motion/benchmarks').then(d => setHistory(d.runs)).catch(() => {});
+  useEffect(() => { loadHistory(); }, []);
 
-  // live elapsed counter
+  // Keep the running bar moving between polls
   useEffect(() => {
-    if (activeStep !== null && stepStart !== null) {
-      elapsedRef.current = setInterval(() => setElapsed(Date.now() - stepStart), 500);
-    } else {
-      elapsedRef.current && clearInterval(elapsedRef.current);
-      setElapsed(0);
-    }
-    return () => { elapsedRef.current && clearInterval(elapsedRef.current); };
-  }, [activeStep, stepStart]);
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running]);
 
-  const setStep = (i: number, patch: Partial<StepState>) =>
-    setSteps(prev => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
-
-  const startTicker = (i: number) => {
-    tickerRef.current && clearInterval(tickerRef.current);
-    let v = 8;
-    tickerRef.current = setInterval(() => {
-      v = Math.min(v + Math.random() * 2.5, 88);
-      setStep(i, { progress: v });
-    }, 400);
-  };
-  const stopTicker = () => { tickerRef.current && clearInterval(tickerRef.current); tickerRef.current = null; };
-
-  const cancel = () => {
-    abortCtrlRef.current?.abort();
-    stopTicker();
-  };
-
-  const apiWithTimeout = async <T,>(url: string, init: RequestInit, timeoutMs: number): Promise<T> => {
-    const ctrl = new AbortController();
-    abortCtrlRef.current = ctrl;
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init, signal: ctrl.signal });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) throw new Error(data.error || 'تعذّر إتمام الطلب');
-      return data as T;
-    } catch (e: any) {
-      if (e.name === 'AbortError') throw new Error('انتهت مهلة الطلب أو تم الإلغاء');
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
+  const save = (body: { jobId: string | null; status: 'done' | 'error'; error?: string; spans: Span[] }) =>
+    body.spans.length
+      ? api('/api/motion/benchmarks', { method: 'POST', body: JSON.stringify({ idea, ...body }) }).then(loadHistory).catch(() => {})
+      : Promise.resolve();
 
   const run = async () => {
     if (!idea.trim() || running) return;
+    cancelled.current = false;
     setRunning(true);
     setErrMsg(null);
-    setSuccess(null);
-    setSteps(STEPS_INIT.map(s => ({ ...s })));
-    const timings: number[] = [];
-
-    const startStep = (i: number) => {
-      setActiveStep(i);
-      setStepStart(Date.now());
-      setStep(i, { status: 'running', progress: 8 });
-      startTicker(i);
-    };
-    const doneStep = (i: number, ms: number) => {
-      stopTicker();
-      setActiveStep(null);
-      setStepStart(null);
-      setStep(i, { status: 'done', progress: 100, ms });
-    };
-
+    setSelected(null);
+    setSpans([]);
+    setNow(Date.now());
+    let all: Span[] = [];
+    let jobId: string | null = null;
     try {
-      // ── Step 0: Script ──────────────────────────────
-      startStep(0);
-      const t0 = Date.now();
-      const scriptRes = await apiWithTimeout<{ success: boolean; script: string; title: string }>(
-        '/api/motion/script',
-        { method: 'POST', body: JSON.stringify({ source: idea, mode: 'idea', minutes: 1, dialect: 'levantine', audience: 'general' }) },
-        SCRIPT_TIMEOUT_MS
-      );
-      timings.push(Date.now() - t0);
-      doneStep(0, timings[0]);
+      setStep('كتابة السكربت');
+      const s = await api<{ script: string; title: string; spans?: Span[] }>('/api/motion/script', {
+        method: 'POST',
+        body: JSON.stringify({ source: idea, mode: 'idea', minutes: 1, dialect: 'levantine', audience: 'general' }),
+      });
+      all = s.spans ?? [];
+      setSpans(all);
+      if (cancelled.current) throw new Error('تم الإلغاء');
 
-      // ── Step 1: Voice + job ─────────────────────────
-      startStep(1);
-      const t1 = Date.now();
-      const jobRes = await apiWithTimeout<{ success: boolean; id: string }>(
-        '/api/motion/jobs',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            script: scriptRes.script, title: scriptRes.title,
-            voice: 'Charon', formats: ['vertical'],
-            dialect: 'levantine', tone: 'educational_tutor',
-            style: 'library', look: 'classic',
-          }),
-        },
-        90_000 // 90 s for TTS
-      );
-      timings.push(Date.now() - t1);
-      doneStep(1, timings[1]);
+      setStep('توليد الصوت');
+      const job = await api<{ id: string }>('/api/motion/jobs', {
+        method: 'POST',
+        body: JSON.stringify({ script: s.script, title: s.title, voice: 'Charon', formats: ['vertical'], dialect: 'levantine', tone: 'educational_tutor', style, look: 'classic' }),
+      });
+      jobId = job.id;
 
-      // ── Step 2: Poll render ─────────────────────────
-      startStep(2);
-      const t2 = Date.now();
-      const deadline = t2 + RENDER_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 3000));
-        if (abortCtrlRef.current?.signal.aborted) throw new Error('تم الإلغاء');
-        const ctrl = new AbortController();
-        abortCtrlRef.current = ctrl;
-        const res  = await fetch(`/api/motion/jobs/${jobRes.id}`, { signal: ctrl.signal });
-        const data = await res.json().catch(() => ({}));
-        const prog = Math.max(5, Math.min(95, data.status?.progress ?? 0));
-        setStep(2, { progress: prog });
-        if (data.status?.state === 'done')  { timings.push(Date.now() - t2); break; }
-        if (data.status?.state === 'error') throw new Error('فشل الرندر');
+      const deadline = Date.now() + LIMIT_MS[style];
+      for (;;) {
+        if (cancelled.current) throw new Error('تم إيقاف المتابعة (الفيديو يكمل على السيرفر)');
+        if (Date.now() > deadline) throw new Error(`انتهت مهلة الاختبار (${LIMIT_MS[style] / 60_000} دقيقة)`);
+        await new Promise(r => setTimeout(r, POLL_MS));
+        const d = await api<{ status: { state: string; step?: string; error?: string; spans?: Span[] } }>(`/api/motion/jobs/${job.id}`);
+        all = [...(s.spans ?? []), ...(d.status.spans ?? [])];
+        setSpans(all);
+        setStep(d.status.step ?? d.status.state);
+        if (d.status.state === 'done') break;
+        if (d.status.state === 'error') throw new Error(d.status.error || 'فشل تجهيز الفيديو');
       }
-      if (timings.length < 3) throw new Error('انتهت مهلة الرندر (6 دقائق)');
-      doneStep(2, timings[2]);
-      setSuccess({ ms: timings });
-
+      await save({ jobId, status: 'done', spans: all });
     } catch (e: any) {
-      stopTicker();
-      setActiveStep(null);
-      setStepStart(null);
-      setStep(timings.length, { status: 'error', progress: 0 });
       setErrMsg(e.message ?? 'خطأ غير متوقع');
+      await save({ jobId, status: 'error', error: e.message, spans: all });
     } finally {
-      stopTicker();
       setRunning(false);
+      setStep(null);
+      setNow(undefined);
     }
   };
 
-  const total = success ? success.ms.reduce((a, b) => a + b, 0) : 0;
+  const shown = selected ? selected.spans : spans;
 
   return (
-    <div className={`${card} max-w-2xl space-y-6`}>
-      <div>
-        <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-          <FlaskConical className="w-4 h-4 text-amber-400" />
-          اختبار أداء الـ Pipeline
-        </h3>
-        <p className="text-xs text-slate-400 mt-0.5">
-          يقيس زمن كل خطوة: سكربت → صوت → رندر. الاختبار لا يُحسب من رصيد المستخدمين.
-        </p>
-      </div>
-
-      <div className="flex gap-3">
-        <textarea
-          rows={3}
-          value={idea}
-          onChange={e => setIdea(e.target.value)}
-          disabled={running}
-          placeholder="اكتب فكرة الفيديو… مثلاً: كيف تعمل الألواح الشمسية؟"
-          className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 resize-none focus:outline-none focus:border-amber-500 disabled:opacity-50"
-          dir="rtl"
-        />
-        <div className="flex flex-col gap-2 self-start">
-          <button
-            type="button"
-            onClick={run}
-            disabled={running || !idea.trim()}
-            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-sm font-bold flex items-center gap-1.5 whitespace-nowrap"
-          >
-            {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <FlaskConical className="w-4 h-4" />}
-            {running ? 'جارٍ…' : 'ابدأ'}
-          </button>
-          {running && (
-            <button
-              type="button"
-              onClick={cancel}
-              className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-sm font-bold flex items-center gap-1.5 whitespace-nowrap"
-            >
-              <StopCircle className="w-4 h-4" />
-              إلغاء
-            </button>
-          )}
+    <div className="space-y-4 max-w-5xl">
+      <div className={`${card} space-y-4`}>
+        <div>
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <FlaskConical className="w-4 h-4 text-amber-400" />
+            اختبار أداء الموشن
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            يصنع فيديو حقيقي (دقيقة، عمودي) ويقيس كل مرحلة: متى بدأت، كم أخذت، كم كلّفت، وكم انتظرت دورها. لا يُخصم من الرصيد.
+          </p>
         </div>
-      </div>
 
-      <div className="flex justify-around py-6 border border-slate-800 rounded-2xl bg-slate-950/50">
-        {steps.map((s, i) => (
-          <Ring key={i} step={s} elapsed={activeStep === i ? elapsed : undefined} />
-        ))}
-      </div>
-
-      {errMsg && (
-        <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl px-4 py-3 text-sm text-rose-300">
-          ❌ {errMsg}
-        </div>
-      )}
-
-      {success && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-emerald-500/50 rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl" dir="rtl">
-            <div className="text-5xl mb-3">✅</div>
-            <h3 className="text-xl font-bold text-white mb-1">تم الاختبار بنجاح</h3>
-            <p className="text-xs text-slate-400 mb-5">نتائج قياس الأداء</p>
-            <div className="space-y-2 text-sm mb-6">
-              {steps.map((s, i) => (
-                <div key={i} className="flex justify-between items-center bg-slate-800/60 rounded-lg px-4 py-2">
-                  <span className="text-slate-300">{s.icon} {s.label}</span>
-                  <span className="font-bold text-emerald-300">{fmtMs(success.ms[i])}</span>
-                </div>
-              ))}
-              <div className="flex justify-between items-center bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-2 mt-1">
-                <span className="font-bold text-white">⏱️ المجموع</span>
-                <span className="font-extrabold text-amber-300 text-base">{fmtMs(total)}</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSuccess(null)}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-8 py-2.5 rounded-xl transition-colors"
+        <div className="flex flex-col sm:flex-row gap-3">
+          <textarea
+            rows={2}
+            value={idea}
+            onChange={e => setIdea(e.target.value)}
+            disabled={running}
+            placeholder="فكرة الفيديو… مثلاً: كيف تعمل الألواح الشمسية؟"
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 resize-none focus:outline-none focus:border-amber-500 disabled:opacity-50"
+            dir="rtl"
+          />
+          <div className="flex sm:flex-col gap-2 self-start">
+            <select
+              value={style}
+              onChange={e => setStyle(e.target.value as Style)}
+              disabled={running}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 disabled:opacity-50"
             >
-              حسناً
-            </button>
+              <option value="library">نسق جاهز</option>
+              <option value="free">نسق حر (أبطأ)</option>
+            </select>
+            {running ? (
+              <button type="button" onClick={() => (cancelled.current = true)} className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-sm font-bold flex items-center gap-1.5 whitespace-nowrap">
+                <StopCircle className="w-4 h-4" /> إيقاف
+              </button>
+            ) : (
+              <button type="button" onClick={run} disabled={!idea.trim()} className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-sm font-bold flex items-center gap-1.5 whitespace-nowrap">
+                <FlaskConical className="w-4 h-4" /> ابدأ
+              </button>
+            )}
           </div>
         </div>
-      )}
+
+        {running && (
+          <div className="flex items-center gap-2 text-xs text-amber-300">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> الآن: {step}
+          </div>
+        )}
+        {errMsg && <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl px-4 py-2 text-sm text-rose-300">❌ {errMsg}</div>}
+        {selected && (
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>تعرض الآن تجربة محفوظة: {selected.idea || '—'} ({selected.createdAt})</span>
+            <button type="button" onClick={() => setSelected(null)} className="text-amber-300 hover:underline">رجوع للتجربة الحالية</button>
+          </div>
+        )}
+
+        <Waterfall spans={shown} now={selected ? undefined : now} />
+      </div>
+
+      <div className={card}>
+        <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-3">
+          <History className="w-4 h-4 text-slate-400" /> التجارب السابقة
+        </h3>
+        {history.length === 0 ? (
+          <p className="text-xs text-slate-500">لا توجد تجارب محفوظة بعد.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-800">
+                  <th className={th}>الوقت</th>
+                  <th className={th}>الفكرة</th>
+                  <th className={th}>النتيجة</th>
+                  <th className={th}>المدة</th>
+                  <th className={th}>التكلفة</th>
+                  <th className={th}>أبطأ مرحلة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(r => {
+                  const s = summarize(r.spans);
+                  return (
+                    <tr key={r.id} onClick={() => setSelected(r)} className={`border-b border-slate-800/60 cursor-pointer hover:bg-slate-800/40 ${selected?.id === r.id ? 'bg-slate-800/60' : ''}`}>
+                      <td className={`${td} text-slate-400`}>{r.createdAt}</td>
+                      <td className={`${td} max-w-[16rem] truncate text-slate-200`}>{r.idea || '—'}</td>
+                      <td className={td}>{r.status === 'done' ? <span className="text-emerald-400">✓ تم</span> : <span className="text-rose-400" title={r.error ?? ''}>✗ فشل</span>}</td>
+                      <td className={`${td} tabular-nums`}>{fmtMs(r.totalMs)}</td>
+                      <td className={`${td} tabular-nums text-amber-200`}>{fmtUsd(r.totalCostUsd)}</td>
+                      <td className={`${td} text-slate-300`}>{s.slowest ? `${s.slowest.label} (${fmtMs(spanMs(s.slowest))})` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

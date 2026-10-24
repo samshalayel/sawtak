@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'fs';
 import path from 'path';
 import { normalizeEmail } from './email-checks.ts';
+import type { BenchmarkRun, Span } from '../src/types/spans.ts';
 
 // Single SQLite file; mount ./data as a volume in production so accounts and balances survive redeploys.
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
@@ -486,4 +487,47 @@ export function getMotionStatsReport(days = 30): MotionStatsReport {
       createdAt: j.created_at,
     })),
   };
+}
+
+// ---------- Performance test runs (admin "اختبار الأداء" tab) ----------
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS benchmark_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea TEXT NOT NULL DEFAULT '',
+    job_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('done', 'error')),
+    error TEXT,
+    total_ms INTEGER NOT NULL DEFAULT 0,
+    total_cost_usd REAL NOT NULL DEFAULT 0,
+    spans TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_benchmark_runs_created ON benchmark_runs(created_at);
+`);
+
+export function saveBenchmarkRun(input: { idea: string; jobId: string | null; status: 'done' | 'error'; error: string | null; spans: Span[] }): number {
+  const start = Math.min(...input.spans.map(s => s.start));
+  const end = Math.max(...input.spans.map(s => s.end));
+  const cost = input.spans.reduce((sum, s) => sum + (Number(s.costUsd) || 0), 0);
+  const result = db.prepare(`
+    INSERT INTO benchmark_runs (idea, job_id, status, error, total_ms, total_cost_usd, spans)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(input.idea, input.jobId, input.status, input.error, Math.max(0, end - start), cost, JSON.stringify(input.spans));
+  return Number(result.lastInsertRowid);
+}
+
+export function listBenchmarkRuns(limit = 30): BenchmarkRun[] {
+  const rows = db.prepare('SELECT * FROM benchmark_runs ORDER BY id DESC LIMIT ?').all(limit) as any[];
+  return rows.map(r => ({
+    id: r.id,
+    createdAt: r.created_at,
+    idea: r.idea,
+    jobId: r.job_id,
+    status: r.status,
+    error: r.error,
+    totalMs: r.total_ms,
+    totalCostUsd: r.total_cost_usd,
+    spans: JSON.parse(r.spans || '[]'),
+  }));
 }
