@@ -51,5 +51,6 @@ export function packageLabel(pkg: CreditPackage, now = new Date()): string {
 }
 
 // Backwards compat helpers (minutes view)
+export const packageBaseMinutes   = (pkg: CreditPackage) => pkg.points / POINTS_PER_MINUTE;
 export const packageBonusMinutes = (pkg: CreditPackage, now = new Date()) => packageBonusPoints(pkg, now) / POINTS_PER_MINUTE;
 export const packageTotalMinutes  = (pkg: CreditPackage, now = new Date()) => packageTotalPoints(pkg, now)  / POINTS_PER_MINUTE;

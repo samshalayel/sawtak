@@ -1035,7 +1035,6 @@ export default function App() {
       {showPackages && (
         <PackagesModal
           user={user}
-          contactWhatsapp={config.contactWhatsapp}
           onClose={() => setShowPackages(false)}
           onLoginRequired={() => {
             setShowPackages(false);

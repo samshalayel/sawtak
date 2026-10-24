@@ -10,7 +10,7 @@ import { ModerationTab } from './ModerationTab';
 import { CustomVoicesTab } from './CustomVoicesTab';
 import { MotionTab } from './MotionTab';
 import { SmtpCard } from './SmtpCard';
-import { PACKAGES, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
+import { PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
 
 type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings';
 
@@ -620,7 +620,7 @@ const UserManager: React.FC<{
                 }}
                 className="px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
               >
-                ₪{pkg.priceIls} · {pkg.minutes} د{bonus > 0 && <b className="text-emerald-300"> +{bonus} هدية</b>}
+                ₪{pkg.priceIls} · {packageBaseMinutes(pkg)} د{bonus > 0 && <b className="text-emerald-300"> +{bonus} هدية</b>}
               </button>
             );
           })}

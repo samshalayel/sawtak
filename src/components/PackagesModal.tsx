@@ -149,7 +149,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onL
       {payingPkg && (
         <JawwalPayModalLazy
           pkg={payingPkg}
-          user={user!}
+          userEmail={user!.email}
           onClose={() => setPayingPkg(null)}
           onSuccess={() => {
             setPayingPkg(null);

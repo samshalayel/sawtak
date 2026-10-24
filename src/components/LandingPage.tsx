@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, AudioLines, Mic2, Languages, Users, Wand2, Copy, Film, Gift, ArrowLeft, Check, Headphones, PenLine, Download, Cake, Moon, TreePine, Gem, GraduationCap, PartyPopper } from 'lucide-react';
 import { VOICES } from '../data/presets';
-import { PACKAGES, isOfferActive, packageBonusMinutes, packageTotalMinutes } from '../data/packages';
+import { PACKAGES, isOfferActive, packageBaseMinutes, packageBonusMinutes, packageTotalMinutes } from '../data/packages';
 
 interface LandingPageProps {
   isLoggedIn: boolean;
@@ -267,7 +267,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
                   </span>
                 )}
                 <div className={`text-4xl font-extrabold ${p.popular ? '' : 'text-gray-800'}`}>₪{p.priceIls}</div>
-                <div className={`mt-1 text-lg font-bold ${p.popular ? 'opacity-95' : 'text-gray-600'}`}>{p.minutes} دقيقة</div>
+                <div className={`mt-1 text-lg font-bold ${p.popular ? 'opacity-95' : 'text-gray-600'}`}>{packageBaseMinutes(p)} دقيقة</div>
                 {bonus > 0 && (
                   <div className={`mt-2 inline-block px-3 py-1 rounded-full text-sm font-bold ${p.popular ? 'bg-[#ffffff33]' : 'bg-emerald-100 text-emerald-700'}`}>
                     +{bonus} دقيقة هدية

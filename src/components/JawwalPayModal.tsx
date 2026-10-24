@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Smartphone, Lock, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { CreditPackage, packageLabel, packageTotalMinutes, packageBonusMinutes, isOfferActive } from '../data/packages';
+import { CreditPackage, packageTotalPoints, packageBonusPoints, isOfferActive } from '../data/packages';
 import { api } from './adminShared';
 
 interface Props {
@@ -20,8 +20,8 @@ export const JawwalPayModal: React.FC<Props> = ({ pkg, userEmail, onClose, onSuc
   const [error, setError] = useState<string | null>(null);
   const [txId, setTxId] = useState<string | null>(null);
 
-  const total = packageTotalMinutes(pkg);
-  const bonus = packageBonusMinutes(pkg);
+  const total = packageTotalPoints(pkg);
+  const bonus = packageBonusPoints(pkg);
   const offerActive = isOfferActive();
 
   const formatPhone = (raw: string) => {
@@ -115,17 +115,17 @@ export const JawwalPayModal: React.FC<Props> = ({ pkg, userEmail, onClose, onSuc
               {/* Invoice card */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
                 <div className="flex justify-between text-sm">
-                  <span className="font-bold text-white">{pkg.minutes} دقيقة صوت</span>
+                  <span className="font-bold text-white">{pkg.points.toLocaleString('en-US')} نقطة</span>
                   <span className="text-slate-400">الباقة</span>
                 </div>
                 {offerActive && bonus > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="font-semibold text-emerald-400">+{bonus} دقيقة مجاناً 🎁</span>
+                    <span className="font-semibold text-emerald-400">+{bonus.toLocaleString('en-US')} نقطة مجاناً 🎁</span>
                     <span className="text-slate-400">عرض الإطلاق</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="font-bold text-slate-200">{total} دقيقة</span>
+                  <span className="font-bold text-slate-200">{total.toLocaleString('en-US')} نقطة</span>
                   <span className="text-slate-400">المجموع</span>
                 </div>
                 <div className="border-t border-slate-800 pt-2.5 flex justify-between">
@@ -200,7 +200,7 @@ export const JawwalPayModal: React.FC<Props> = ({ pkg, userEmail, onClose, onSuc
               {/* Invoice summary */}
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3 flex justify-between items-center">
                 <span className="text-xl font-extrabold text-amber-300">₪{pkg.priceIls}</span>
-                <span className="text-sm text-slate-300">{total} دقيقة صوت</span>
+                <span className="text-sm text-slate-300">{total.toLocaleString('en-US')} نقطة</span>
               </div>
 
               {error && (
@@ -230,7 +230,7 @@ export const JawwalPayModal: React.FC<Props> = ({ pkg, userEmail, onClose, onSuc
             <div className="text-center py-6 space-y-3">
               <CheckCircle className="w-14 h-14 text-green-400 mx-auto" />
               <p className="text-lg font-bold text-white">تمّت العملية بنجاح!</p>
-              <p className="text-sm text-slate-400">تمّت إضافة <b className="text-white">{total} دقيقة</b> إلى رصيدك.</p>
+              <p className="text-sm text-slate-400">تمّت إضافة <b className="text-white">{total.toLocaleString('en-US')} نقطة</b> إلى رصيدك.</p>
               {txId && <p className="text-xs text-slate-600 font-mono">#{txId}</p>}
             </div>
           )}
