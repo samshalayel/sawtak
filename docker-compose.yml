@@ -19,7 +19,6 @@ services:
       - traefik.http.routers.sawtik.tls.certresolver=cf
       - traefik.http.services.sawtik.loadbalancer.server.port=3000
     volumes:
-      - ./dist-new:/app/dist/new
       - ./data:/app/data
     logging:
       driver: json-file

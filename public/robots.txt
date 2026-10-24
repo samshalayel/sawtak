@@ -3,7 +3,6 @@ User-agent: *
 Allow: /
 
 # Sitemaps
-Sitemap: https://tts.sillar.us/sitemap.xml
 Sitemap: https://tts.smartcloud.ps/sitemap.xml
 
 # Disallow private paths

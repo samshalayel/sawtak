@@ -596,7 +596,7 @@ const videoLimiter = createRateLimiter(() => 15, 60 * 60 * 1000);
 const SITE_DOMAINS = [process.env.PUBLIC_URL, ...(process.env.EXTRA_PUBLIC_URLS || '').split(',')]
   .map(u => { try { return new URL((u || '').trim()).hostname; } catch { return ''; } })
   .filter(Boolean);
-const watermarkDomain = (host: string) => (SITE_DOMAINS.includes(host) ? host : SITE_DOMAINS[0] || 'tts.sillar.us');
+const watermarkDomain = (host: string) => (SITE_DOMAINS.includes(host) ? host : SITE_DOMAINS[0] || 'tts.smartcloud.ps');
 const MAX_VIDEO_SECONDS = 5 * 60;
 
 interface VideoJob {
@@ -1167,11 +1167,9 @@ ${text}`;
   }
 });
 
-// ---------- Installable app (PWA): one manifest per domain, matching that domain's design ----------
+// ---------- Installable app (PWA) ----------
 
-const NEW_UI_HOSTS = (process.env.NEW_UI_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean);
-app.get('/manifest.webmanifest', (req, res) => {
-  const playful = NEW_UI_HOSTS.includes(req.hostname.toLowerCase());
+app.get('/manifest.webmanifest', (_req, res) => {
   res.type('application/manifest+json').set('Cache-Control', 'no-cache').json({
     id: '/',
     name: 'صوتك الذكي',
@@ -1179,12 +1177,12 @@ app.get('/manifest.webmanifest', (req, res) => {
     description: 'استوديو تحويل النص إلى صوت عربي طبيعي، تهاني بالصوت، واستوديو الصحفيين',
     lang: 'ar',
     dir: 'rtl',
-    start_url: playful ? '/?source=pwa#/studio' : '/?source=pwa',
+    start_url: '/?source=pwa#/studio',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',
-    theme_color: playful ? '#0891b2' : '#0f172a',
-    background_color: playful ? '#f0fdfa' : '#020617',
+    theme_color: '#0891b2',
+    background_color: '#f0fdfa',
     icons: [
       { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
@@ -1207,19 +1205,13 @@ if (process.env.NODE_ENV !== 'production') {
   });
   app.use(vite.middlewares);
 } else {
-  // Domains listed in NEW_UI_HOSTS get the redesigned app (built into dist/new) as their home page;
-  // its assets live under /new/ and it shares this backend, so accounts work on every domain.
-  const newUiHosts = (process.env.NEW_UI_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean);
-  const indexFor = (req: express.Request) =>
-    newUiHosts.includes(req.hostname.toLowerCase())
-      ? path.resolve(__dirname, 'dist', 'new', 'index.html')
-      : path.resolve(__dirname, 'dist', 'index.html');
+  const indexHtml = path.resolve(__dirname, 'dist', 'index.html');
 
-  app.get(['/', '/index.html'], (req, res) => res.sendFile(indexFor(req)));
-  app.get(['/new', '/new/'], (_req, res) => res.sendFile(path.resolve(__dirname, 'dist', 'new', 'index.html')));
+  // The redesign used to live under /new; keep old links working
+  app.get(['/new', '/new/'], (_req, res) => res.redirect(301, '/'));
   app.use(express.static(path.resolve(__dirname, 'dist'), { index: false }));
-  app.get('*', (req, res) => {
-    res.sendFile(indexFor(req));
+  app.get('*', (_req, res) => {
+    res.sendFile(indexHtml);
   });
 }
 

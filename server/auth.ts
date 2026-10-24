@@ -34,7 +34,7 @@ declare global {
 const isAdminEmail = (email: string) => ADMIN_EMAILS.includes(normalizeEmail(email));
 
 // Public base URL for links in emails and the Google redirect URI.
-// Set PUBLIC_URL in production (e.g. https://tts.sillar.us); otherwise derived from the request.
+// Set PUBLIC_URL in production (e.g. https://tts.smartcloud.ps); otherwise derived from the request.
 // Several domains can serve the site (PUBLIC_URL plus EXTRA_PUBLIC_URLS, comma-separated). Links in e-mails
 // and the Google redirect stay on the domain the visitor is using; unknown hosts fall back to PUBLIC_URL.
 const PUBLIC_ORIGINS = [process.env.PUBLIC_URL, ...(process.env.EXTRA_PUBLIC_URLS || '').split(',')]

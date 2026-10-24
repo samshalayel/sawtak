@@ -351,7 +351,7 @@ export function enqueueRender<T>(task: () => Promise<T>, onStart?: () => void): 
   return job;
 }
 
-async function renderNow({ wav, text, image, format, greeting, title = '', captions = true, hd = false, domain = 'tts.sillar.us', onProgress }: RenderOptions): Promise<Buffer> {
+async function renderNow({ wav, text, image, format, greeting, title = '', captions = true, hd = false, domain = 'tts.smartcloud.ps', onProgress }: RenderOptions): Promise<Buffer> {
   const profile = hd ? RENDER_PROFILES.hd : RENDER_PROFILES.fast;
   const theme = greeting ? GREETING_THEMES[greeting.themeId] : undefined;
   const placement = greeting ? greetingLayout(greeting, Boolean(image)) : undefined;
