@@ -1,18 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AudioTagBar } from './AudioTagBar';
-import { Book, ChevronDown, Download, Leaf, Loader2, Pause, Play, Search, Share2, Volume2, Wand2 } from 'lucide-react';
+import { Download, Leaf, Loader2, Pause, Play, Share2, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
 import { AuthUser } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
 import { stripAudioTags } from '../utils/audioTags';
 import { CALM_FONTS, CalmFont, calmFont } from '../data/calmFonts';
 import { DAY_ART, DECOR_GRADIENT, STICKER_ICONS, STICKER_LOOKS, STICKER_THEMES, stickerLayout, vowelled } from '../data/calmStickers';
-
-// Quran verse types
-interface QuranTopic { label: string; verses: { surah: number; start: number; end: number; label: string }[] }
-interface QuranReciter { name: string; value: string; quality: string }
-interface QuranVerse { surah: number; verse: number; surahName: string; verseKey: string; textArabic: string; translationEn: string; audioUrl: string }
-interface QuranSurah { number: number; name: string; englishName: string; versesCount: number }
 
 // "Calm reels": gentle vertical videos — real nature scenes, a slow calm voice and large captions — for people
 // going through hard times. Texts stay modest (a quiet moment, not a treatment); scenes are filtered on the server.
@@ -136,183 +130,6 @@ const isDark = (hex: string) => {
   return 0.299 * r + 0.587 * g + 0.114 * b < 110;
 };
 
-/** Quran verse search panel */
-const QuranSearch: React.FC<{
-  open: boolean;
-  onClose: () => void;
-  onSelect: (verse: QuranVerse | QuranVerse[]) => void;
-}> = ({ open, onClose, onSelect }) => {
-  const [mode, setMode] = useState<'topic' | 'search'>('topic');
-  const [topics, setTopics] = useState<Record<string, QuranTopic>>({});
-  const [reciters, setReciters] = useState<QuranReciter[]>([]);
-  const [surahs, setSurahs] = useState<QuranSurah[]>([]);
-  const [selectedTopic, setSelectedTopic] = useState('');
-  const [selectedReciter, setSelectedReciter] = useState('Alafasy_64kbps');
-  const [surah, setSurah] = useState(1);
-  const [startVerse, setStartVerse] = useState(1);
-  const [endVerse, setEndVerse] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [verses, setVerses] = useState<QuranVerse[]>([]);
-  const [error, setError] = useState('');
-  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    fetch('/api/calm/quran/topics').then(r => r.json()).then(d => {
-      if (d.success !== false && d.topics) setTopics(d.topics);
-    }).catch(() => {});
-    fetch('/api/calm/quran/reciters').then(r => r.json()).then(d => {
-      if (d.reciters) setReciters(d.reciters);
-    }).catch(() => {});
-    fetch('/api/calm/quran/surahs').then(r => r.json()).then(d => {
-      if (d.surahs) setSurahs(d.surahs);
-    }).catch(() => {});
-  }, [open]);
-
-  const searchByTopic = async (topicKey: string) => {
-    const topic = topics[topicKey];
-    if (!topic?.verses?.length) return;
-    setLoading(true);
-    setError('');
-    setVerses([]);
-    try {
-      const all: QuranVerse[] = [];
-      for (const v of topic.verses.slice(0, 5)) {
-        const res = await fetch(`/api/calm/quran/verses?surah=${v.surah}&start=${v.start}&end=${v.end}&reciter=${selectedReciter}`);
-        const data = await res.json();
-        if (data.verses) all.push(...data.verses);
-      }
-      setVerses(all);
-    } catch {
-      setError('تعذّر جلب الآيات');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const searchByNumber = async () => {
-    if (!surah || !startVerse) return;
-    setLoading(true);
-    setError('');
-    setVerses([]);
-    try {
-      const res = await fetch(`/api/calm/quran/verses?surah=${surah}&start=${startVerse}&end=${endVerse || startVerse}&reciter=${selectedReciter}`);
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      setVerses(data.verses || []);
-    } catch (e: any) {
-      setError(e?.message || 'تعذّر جلب الآيات');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const playAudio = (url: string) => {
-    audioRef.current?.pause();
-    if (playingAudio === url) {
-      setPlayingAudio(null);
-      return;
-    }
-    const a = new Audio(url);
-    a.onended = () => setPlayingAudio(null);
-    a.play().catch(() => setPlayingAudio(null));
-    audioRef.current = a;
-    setPlayingAudio(url);
-  };
-
-  useEffect(() => () => { audioRef.current?.pause(); }, []);
-
-  if (!open) return null;
-
-  const chip = (active: boolean) => `px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${active ? 'bg-emerald-500/15 border-emerald-500/70 text-emerald-200' : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700'}`;
-  const input = 'w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl p-5 space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2"><Book className="w-5 h-5 text-emerald-400" /> اختر آية قرآنية</h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white text-xl">&times;</button>
-        </div>
-
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setMode('topic')} className={chip(mode === 'topic')}>حسب الموضوع</button>
-          <button type="button" onClick={() => setMode('search')} className={chip(mode === 'search')}>بحث برقم الآية</button>
-        </div>
-
-        {/* Reciter selector */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">القارئ:</span>
-          <select value={selectedReciter} onChange={e => setSelectedReciter(e.target.value)} className={`${input} w-auto`}>
-            {reciters.map(r => <option key={r.value} value={r.value}>{r.name}</option>)}
-          </select>
-        </div>
-
-        {mode === 'topic' ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(topics).filter(([k]) => k !== 'all').map(([key, topic]) => (
-                <button key={key} type="button" onClick={() => { setSelectedTopic(key); searchByTopic(key); }} className={chip(selectedTopic === key)}>
-                  {topic.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-xs text-slate-400">السورة</label>
-                <select value={surah} onChange={e => { setSurah(+e.target.value); setStartVerse(1); setEndVerse(1); }} className={input}>
-                  {surahs.map(s => <option key={s.number} value={s.number}>{s.number}. {s.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-slate-400">من آية</label>
-                <input type="number" min={1} max={surahs.find(s => s.number === surah)?.versesCount || 286} value={startVerse} onChange={e => setStartVerse(+e.target.value)} className={input} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400">إلى آية</label>
-                <input type="number" min={startVerse} max={Math.min(startVerse + 10, surahs.find(s => s.number === surah)?.versesCount || 286)} value={endVerse} onChange={e => setEndVerse(+e.target.value)} className={input} />
-              </div>
-            </div>
-            <button type="button" onClick={searchByNumber} disabled={loading} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/50 text-emerald-200 text-sm font-semibold hover:bg-emerald-500/30">
-              <Search className="w-4 h-4" /> بحث
-            </button>
-          </div>
-        )}
-
-        {loading && <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-emerald-400" /></div>}
-        {error && <p className="text-rose-300 text-sm">{error}</p>}
-
-        {verses.length > 0 && (
-          <div className="space-y-3 pt-2 border-t border-slate-800">
-            <p className="text-xs text-slate-400">اضغط على الآية لاستخدامها</p>
-            {verses.map((v, i) => (
-              <div key={`${v.verseKey}-${i}`} className="p-3 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-emerald-500/50 cursor-pointer space-y-2" onClick={() => { onSelect(v); onClose(); }}>
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-lg text-white leading-loose font-arabic" style={{ fontFamily: "'Amiri', serif" }}>{v.textArabic}</p>
-                  <button type="button" onClick={e => { e.stopPropagation(); playAudio(v.audioUrl); }} className="shrink-0 w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center hover:bg-emerald-500/30">
-                    {playingAudio === v.audioUrl ? <Pause className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-400">{v.surahName} — آية {v.verse}</p>
-                <p className="text-xs text-slate-500 leading-relaxed">{v.translationEn}</p>
-              </div>
-            ))}
-            {verses.length > 1 && (
-              <button type="button" onClick={() => { onSelect(verses); onClose(); }} className="w-full py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/50 text-emerald-200 text-sm font-semibold hover:bg-emerald-500/30">
-                استخدام كل الآيات ({verses.length})
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 interface Props {
   user: AuthUser | null;
   onLoginRequired: (reason: string) => void;
@@ -327,7 +144,6 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
   const [title, setTitle] = useState(TEMPLATES[0].title);
   const [voiceId, setVoiceId] = useState('Sulafat');
   const [scene, setScene] = useState('forest');
-  const [quranSearchOpen, setQuranSearchOpen] = useState(false);
   const [clips, setClips] = useState<Clip[]>([]);
   const [loadingClips, setLoadingClips] = useState(false);
   const [chosen, setChosen] = useState<number[]>([]);
@@ -492,9 +308,6 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
         <div className="flex flex-wrap gap-2">
           {TEMPLATES.map(t => <button key={t.id} type="button" onClick={() => chooseTemplate(t.id)} className={chip(templateId === t.id)}>{t.label}</button>)}
           <button type="button" onClick={() => { setTemplateId('custom'); setText(''); setTitle(''); }} className={chip(templateId === 'custom')}>نص من عندي</button>
-          <button type="button" onClick={() => setQuranSearchOpen(true)} className={`${chip(templateId === 'quran')} flex items-center gap-1.5`}>
-            <Book className="w-3.5 h-3.5" /> آية قرآنية
-          </button>
         </div>
         <AudioTagBar target={textBox} value={text} onChange={v => setText(v.slice(0, 1200))} />
         <textarea ref={textBox} value={text} onChange={e => setText(e.target.value.slice(0, 1200))} rows={5} placeholder="اكتب كلمات هادئة… النقاط الثلاث (...) تعطي وقفة أطول في الصوت" className={`${input} leading-loose`} />
@@ -715,18 +528,6 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />} اصنع الريل
       </button>
       <p className="text-[11px] text-slate-500 text-center">يُخصم من رصيدك مدة الصوت فقط. تجهيز الفيديو مجاني.</p>
-
-      <QuranSearch
-        open={quranSearchOpen}
-        onClose={() => setQuranSearchOpen(false)}
-        onSelect={(v) => {
-          const verses = Array.isArray(v) ? v : [v];
-          const combined = verses.map(verse => verse.textArabic).join('\n\n');
-          setText(combined);
-          setTitle(verses[0].surahName + (verses.length > 1 ? ` (${verses[0].verse}-${verses[verses.length - 1].verse})` : ` — آية ${verses[0].verse}`));
-          setTemplateId('quran');
-        }}
-      />
     </div>
   );
 };

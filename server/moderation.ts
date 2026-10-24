@@ -1,7 +1,9 @@
 // Content moderation: an admin-managed list of banned words checked before any text reaches Gemini.
 // Matching works on a normalised form so diacritics, letter variants, stretched letters and
 // separators ("ك.ل.ب", "ك ل ب", "كلللب") don't slip through.
+import crypto from 'crypto';
 import { db } from './db.ts';
+import { availableKeys } from './keys.ts';
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS moderation_words (
@@ -38,9 +40,32 @@ const STARTER_WORDS = [
   'sharmouta', 'sharmota', 'kosomak', 'kos omak', 'ahbe',
 ];
 
-if ((db.prepare('SELECT COUNT(*) AS n FROM moderation_words').get() as { n: number }).n === 0) {
+// Explicit sexual terms and suggestive phrases (added 2026-10-13). Words that also appear in normal,
+// medical or religious content (جماع، نكاح، جنس، قضيب، شهوة…) are deliberately left out.
+const SEXUAL_ADDITIONS = [
+  'مضاجعة', 'ضاجع', 'ضاجعني', 'يضاجع', 'نيكني', 'نيكها', 'نكتها', 'انيكك', 'انيكها', 'نياك', 'منايك', 'نياكه',
+  'زبر', 'زبه', 'زبك', 'ايري', 'ايرك', 'بزاز', 'بزازك', 'بزازها', 'مصيلي', 'لحسلي', 'شبقة', 'هايجة', 'سحاقية',
+  'سكسي', 'سكسية', 'بورنو', 'اباحي', 'اباحية', 'افلام سكس', 'صور عارية', 'شلحي', 'اشلحي', 'اشلحيلي', 'اتعري',
+  'نمارس الجنس', 'مارسنا الجنس', 'نمارس الحب', 'بدي انام معك', 'بدي انام معكي',
+  'تعالي ع السرير', 'تعالي عالسرير', 'تعالي عالتخت', 'بدي اياكي بالسرير',
+  'zeb', 'zebi', 'nik', 'neek', 'nayek', 'sex', 'sexy', 'porn', 'xxx', 'nude', 'nudes', 'horny',
+  'fuck', 'fucking', 'pussy', 'dick', 'cock', 'boobs', 'tits',
+];
+
+// Word batches are applied once each, so words the admin deletes later don't come back on restart
+db.exec('CREATE TABLE IF NOT EXISTS moderation_seeds (batch TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
+const SEED_BATCHES: [string, string[]][] = [['starter', STARTER_WORDS], ['sexual-2026-10', SEXUAL_ADDITIONS]];
+{
   const insert = db.prepare('INSERT OR IGNORE INTO moderation_words (word) VALUES (?)');
-  for (const w of STARTER_WORDS) insert.run(w);
+  const applied = db.prepare('SELECT 1 FROM moderation_seeds WHERE batch = ?');
+  const mark = db.prepare('INSERT INTO moderation_seeds (batch) VALUES (?)');
+  const hasWords = (db.prepare('SELECT COUNT(*) AS n FROM moderation_words').get() as { n: number }).n > 0;
+  for (const [batch, words] of SEED_BATCHES) {
+    if (applied.get(batch)) continue;
+    // Existing installs already have (an admin-edited copy of) the starter list
+    if (!(batch === 'starter' && hasWords)) for (const w of words) insert.run(w);
+    mark.run(batch);
+  }
 }
 
 // ---------- Normalisation ----------
@@ -156,4 +181,111 @@ export function moderate(text: string, opts: { userId: number; feature: string; 
 }
 
 export const BLOCKED_MESSAGE =
-  'النص يحتوي على ألفاظ غير مسموح بها وفق شروط الاستخدام. يرجى تعديل النص والمحاولة مجدداً.';
+  'النص يحتوي على ألفاظ أو إيحاءات غير مسموح بها وفق شروط الاستخدام. يرجى تعديل النص والمحاولة مجدداً.';
+
+// ---------- Meaning check (AI) ----------
+// A word list can't see innuendo, euphemisms or new spellings, so after the list passes, a fast
+// Gemini text call judges what the text means. If Google is slow or down the request is allowed
+// (the word list still applies) so customers are never blocked by an outage. The check never puts
+// keys on cooldown: a slow review must not take generation capacity away from customers.
+
+const AI_MODEL = 'gemini-3.5-flash-lite';
+const AI_TIMEOUT_MS = 8_000;
+
+const AI_CATEGORIES: Record<string, string> = {
+  sexual: 'محتوى جنسي أو إيحاء',
+  harassment: 'إهانة أو تحرّش',
+  hate: 'كراهية أو تحريض',
+  violence: 'تهديد أو عنف',
+  self_harm: 'إيذاء النفس',
+  illegal: 'نشاط غير قانوني',
+};
+
+const AI_INSTRUCTION = `You are the content-safety reviewer of an Arabic text-to-speech studio. The text will be spoken aloud and published.
+Decide if it may be voiced. Read it in any Arabic dialect, English or mixed, including misspellings, letters split by spaces or symbols, Arabizi (3=ع, 7=ح…) and euphemisms.
+Reject (allowed=false) when the text contains or clearly implies:
+- sexual: explicit sexual content, sexual innuendo or suggestive double meanings, flirting with sexual intent, descriptions of private body parts in a sexual way;
+- harassment: insults, swearing or degrading language aimed at a person or group;
+- hate: hatred or incitement against a religion, ethnicity, nationality, gender or group;
+- violence: threats, glorifying or encouraging violence or terrorism;
+- self_harm: encouraging suicide or self-harm;
+- illegal: promoting drugs, fraud, scams or other clearly illegal acts.
+Allow (allowed=true): ordinary content, ads, news (even about crimes or wars), education including medical and sexual-health education in a clinical tone, non-sexual romance and poetry, religious content, children's stories, mild everyday expressions.
+When unsure whether something is innuendo, judge how a typical Arabic-speaking listener would understand it.`;
+
+const AI_SCHEMA = {
+  type: 'object',
+  properties: {
+    allowed: { type: 'boolean' },
+    category: { type: 'string', enum: ['none', ...Object.keys(AI_CATEGORIES)] },
+    reason: { type: 'string', description: 'Short reason in Arabic (max 12 words)' },
+  },
+  required: ['allowed', 'category'],
+};
+
+// Same text is often regenerated with other settings: remember recent verdicts for 30 minutes
+const aiCache = new Map<string, { allowed: boolean; category: string; reason: string; at: number }>();
+const AI_CACHE_MS = 30 * 60 * 1000;
+
+async function aiVerdict(text: string): Promise<{ allowed: boolean; category: string; reason: string } | null> {
+  const cacheKey = crypto.createHash('sha256').update(text).digest('hex');
+  const cached = aiCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < AI_CACHE_MS) return cached;
+
+  const apiKey = availableKeys()[0];
+  if (!apiKey) return null;
+  try {
+    // One attempt, one key, no cooldown on failure (see note above)
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'x-goog-api-key': apiKey.api_key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: AI_INSTRUCTION }] },
+        contents: [{ role: 'user', parts: [{ text: `TEXT TO REVIEW:\n"""\n${text.slice(0, 6000)}\n"""` }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseJsonSchema: AI_SCHEMA,
+          thinkingConfig: { thinkingLevel: 'MINIMAL' },
+          temperature: 0,
+        },
+      }),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+    const parsed = JSON.parse(data?.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text || '{}');
+    const verdict = {
+      allowed: parsed.allowed !== false,
+      category: String(parsed.category || 'none'),
+      reason: String(parsed.reason || '').slice(0, 120),
+      at: Date.now(),
+    };
+    if (aiCache.size > 500) aiCache.delete(aiCache.keys().next().value!);
+    aiCache.set(cacheKey, verdict);
+    return verdict;
+  } catch (err: any) {
+    console.warn('[moderation] AI check skipped:', String(err?.message || err).slice(0, 160));
+    return null;
+  }
+}
+
+/**
+ * Full policy: banned-word list first (instant), then the meaning check when enabled.
+ * Logs every hit; in "flag" mode hits are recorded but allowed.
+ */
+export async function moderateFull(
+  text: string,
+  opts: { userId: number; feature: string; mode: ModerationMode; ai: boolean }
+): Promise<ModerationVerdict> {
+  const listed = moderate(text, opts);
+  if (!listed.allowed || listed.matched.length > 0 || opts.mode === 'off' || !opts.ai || !text.trim()) return listed;
+
+  const verdict = await aiVerdict(text.trim());
+  if (!verdict || verdict.allowed) return { allowed: true, matched: [] };
+
+  const label = `فحص ذكي: ${AI_CATEGORIES[verdict.category] ?? verdict.category}${verdict.reason ? ` (${verdict.reason})` : ''}`;
+  const action = opts.mode === 'block' ? 'blocked' : 'flagged';
+  db.prepare('INSERT INTO moderation_events (user_id, feature, matched, excerpt, action) VALUES (?, ?, ?, ?, ?)')
+    .run(opts.userId, opts.feature, label, text.slice(0, 300), action);
+  return { allowed: opts.mode !== 'block', matched: [label] };
+}

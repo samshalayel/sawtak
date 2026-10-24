@@ -68,7 +68,7 @@ export function hasUsableKeys(): boolean {
   return (db.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE enabled = 1').get() as { n: number }).n > 0;
 }
 
-function availableKeys(): ApiKeyRow[] {
+export function availableKeys(): ApiKeyRow[] {
   const now = new Date().toISOString();
   return db.prepare(`
     SELECT * FROM api_keys
@@ -136,26 +136,52 @@ export class NoKeysAvailableError extends Error {
  */
 export async function withGeminiFailover<T>(
   label: string,
-  fn: (client: GoogleGenAI) => Promise<T>
+  fn: (client: GoogleGenAI, key: ApiKeyRow) => Promise<T>,
+  // Text-model calls pass { cooldown: false }: their quota and load are separate from the TTS model's,
+  // so a busy or slow text model must not take keys away from voice generation
+  opts: { cooldown?: boolean } = {}
 ): Promise<{ result: T; keyId: number }> {
   const keys = availableKeys();
   let lastError: unknown;
 
   for (const key of keys) {
     try {
-      const result = await fn(clientFor(key.api_key));
+      const result = await fn(clientFor(key.api_key), key);
       markSuccess(key.id);
       return { result, keyId: key.id };
     } catch (err) {
       const { kind, cooldownSec, summary } = classifyError(err);
       if (kind === 'fatal') throw err;
       lastError = err;
+      if (opts.cooldown === false) {
+        console.warn(`[keys] ${label}: key #${key.id} (${maskKey(key.api_key)}) failed — ${summary}; trying next key (no cooldown)`);
+        continue;
+      }
       markFailure(key.id, cooldownSec, summary);
       console.warn(`[keys] ${label}: key #${key.id} (${maskKey(key.api_key)}) failed — ${summary}; cooldown ${cooldownSec}s, trying next key`);
     }
   }
 
   throw new NoKeysAvailableError(lastError);
+}
+
+/**
+ * Runs a call with one specific key, without failover. Custom voices live in the Google project
+ * that created them, so they can only be used through a key from that project.
+ */
+export async function withPinnedKey<T>(keyId: number, label: string, fn: (key: ApiKeyRow) => Promise<T>): Promise<T> {
+  const key = db.prepare('SELECT * FROM api_keys WHERE id = ? AND enabled = 1').get(keyId) as unknown as ApiKeyRow | undefined;
+  if (!key) throw Object.assign(new Error('The API key that owns this voice is missing or disabled'), { code: 'VOICE_KEY_MISSING' });
+  try {
+    const result = await fn(key);
+    markSuccess(key.id);
+    return result;
+  } catch (err) {
+    const { cooldownSec, summary } = classifyError(err);
+    markFailure(key.id, cooldownSec, summary);
+    console.warn(`[keys] ${label}: pinned key #${key.id} (${maskKey(key.api_key)}) failed — ${summary}`);
+    throw err;
+  }
 }
 
 /** Cheap call that doesn't consume generation quota: fetch the TTS model's metadata. */

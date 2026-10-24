@@ -95,7 +95,7 @@ export async function sendVerificationEmail(to: string, name: string, link: stri
 
   const greeting = name ? `أهلاً ${name}،` : 'أهلاً بك،';
   const htmlGreeting = escapeHtml(greeting);
-  await transportFor(config).sendMail({
+  const info = await transportFor(config).sendMail({
     from: config.from,
     to,
     subject: 'تأكيد بريدك الإلكتروني — صوتك الذكي',
@@ -118,4 +118,8 @@ export async function sendVerificationEmail(to: string, name: string, link: stri
       </div>
     `,
   });
+  // Record the provider's answer, so "the email never came" can be traced (address partly masked)
+  const masked = to.replace(/^(.{3})[^@]*/, '$1***');
+  const rejected = info.rejected?.length ? ` rejected=${info.rejected.length}` : '';
+  console.log(`[mail] verification sent to ${masked}: ${info.response || 'ok'} id=${info.messageId}${rejected}`);
 }

@@ -59,11 +59,48 @@ async function hasMailServer(domain: string): Promise<boolean> {
   }
 }
 
+// Near-misses of these providers are flagged even when not listed above (gmil.com, hotmali.com…).
+// Typo domains are often registered by squatters with a working mail server, so the MX check alone lets them through.
+const POPULAR_PROVIDERS = ['gmail', 'hotmail', 'yahoo', 'outlook', 'icloud'];
+// Real providers that happen to look like a typo of a popular one
+const REAL_LOOKALIKES = new Set(['mail.com', 'email.com', 'ymail.com', 'gmx.com', 'hmail.com', 'fmail.com']);
+
+// Optimal string alignment distance (insert, delete, substitute, swap adjacent letters)
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+function suggestDomain(domain: string): string | null {
+  if (DOMAIN_TYPOS[domain]) return DOMAIN_TYPOS[domain];
+  if (REAL_LOOKALIKES.has(domain)) return null;
+  const dot = domain.indexOf('.');
+  if (dot < 1) return null;
+  const name = domain.slice(0, dot);
+  const tld = domain.slice(dot + 1);
+  // Gmail has no country domains
+  if (name === 'gmail' && tld !== 'com') return 'gmail.com';
+  if (tld !== 'com') return null;
+  for (const provider of POPULAR_PROVIDERS) {
+    if (name === provider) continue;
+    if (editDistance(name, provider) <= (provider.length >= 6 ? 2 : 1)) return `${provider}.com`;
+  }
+  return null;
+}
+
 export async function checkEmailDeliverable(email: string): Promise<EmailCheckResult> {
   const lower = email.trim().toLowerCase();
   const domain = lower.split('@')[1] || '';
 
-  const fix = DOMAIN_TYPOS[domain];
+  const fix = suggestDomain(domain);
   if (fix) {
     const suggestion = `${lower.split('@')[0]}@${fix}`;
     return { ok: false, error: `يبدو أن هناك خطأ إملائياً، هل تقصد ${suggestion}؟`, suggestion };

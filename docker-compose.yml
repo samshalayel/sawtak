@@ -13,11 +13,13 @@ services:
       - web
     labels:
       - traefik.enable=true
-      - traefik.http.routers.sawtik.rule=Host(`tts.sillar.us`)
+      - traefik.http.routers.sawtik.rule=Host(`tts.sillar.us`) || Host(`tts.smartcloud.ps`)
       - traefik.http.routers.sawtik.entrypoints=websecure
       - traefik.http.routers.sawtik.tls=true
+      - traefik.http.routers.sawtik.tls.certresolver=cf
       - traefik.http.services.sawtik.loadbalancer.server.port=3000
     volumes:
+      - ./dist-new:/app/dist/new
       - ./data:/app/data
     logging:
       driver: json-file

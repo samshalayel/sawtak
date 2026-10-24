@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { promisify } from 'util';
 import {
-  db, getSettings, getUserById, getUserByNormalizedEmail, grantSignupBonusOnce, publicUser, UserRow
+  db, getSettings, getUserById, getUserByNormalizedEmail, grantSignupBonusOnce, hasPermission, Permission, publicUser, UserRow
 } from './db.ts';
 import { checkEmailDeliverable, normalizeEmail } from './email-checks.ts';
 import { sendVerificationEmail } from './mailer.ts';
@@ -133,6 +133,14 @@ export function requireAdmin(req: express.Request, res: express.Response, next: 
   next();
 }
 
+/** Lets admins and accounts that were granted this feature through. */
+export const requirePermission = (p: Permission) => (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!hasPermission(req.user, p)) {
+    return res.status(403).json({ success: false, error: 'هذه الميزة غير مفعّلة لحسابك' });
+  }
+  next();
+};
+
 // ---------- Simple in-memory rate limiter ----------
 
 export function createRateLimiter(limit: () => number, windowMs: number) {
@@ -260,6 +268,14 @@ authRouter.post('/login', async (req, res) => {
 
   createSession(res, user.id);
   res.json({ success: true, user: publicUser(getUserById(user.id)!) });
+});
+
+// Starred voices (settings, not content): replaced as a whole list
+authRouter.put('/favorites', requireAuth, (req, res) => {
+  const voices = [...new Set((Array.isArray(req.body?.voices) ? req.body.voices : [])
+    .filter((v: unknown) => typeof v === 'string' && /^[A-Za-z]{2,24}$/.test(v)))].slice(0, 40);
+  db.prepare('UPDATE users SET favorite_voices = ? WHERE id = ?').run(JSON.stringify(voices), req.user!.id);
+  res.json({ success: true, favoriteVoices: voices });
 });
 
 authRouter.post('/logout', (req, res) => {

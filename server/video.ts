@@ -6,6 +6,12 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import sharp from 'sharp';
+import { GREETING_THEMES, GreetingTheme } from './greeting-themes.ts';
+import { stripAudioTags } from '../src/utils/audioTags.ts';
+import {
+  GREETING_DESIGN, DEFAULT_PHOTO_BOX, PhotoBox, buildGreetingBackground, waveColorFor,
+  GREETING_FONTS, DEFAULT_TEXT_STYLE, TextStyle, isDarkColor,
+} from './greeting-art.ts';
 
 export type VideoFormat = 'square' | 'vertical' | 'landscape';
 
@@ -27,7 +33,7 @@ const LAYOUTS: Record<VideoFormat, Layout> = {
 };
 
 // Speed vs quality. Layouts are designed at 1080p; "fast" renders at 720p, fewer frames and a quicker x264 preset.
-const RENDER_PROFILES = {
+export const RENDER_PROFILES = {
   fast: { scale: 2 / 3, fps: Number(process.env.VIDEO_FPS) || 24, preset: process.env.VIDEO_PRESET || 'superfast' },
   hd: { scale: 1, fps: 30, preset: 'veryfast' },
 } as const;
@@ -47,10 +53,10 @@ function scaleLayout(layout: Layout, scale: number): Layout {
 }
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
-const ARABIC_FONT = process.env.VIDEO_FONT || 'Noto Sans Arabic';
-const watermarkFor = (domain: string) => `صُنع بواسطة صوتك الذكي · ${domain}`;
+export const ARABIC_FONT = process.env.VIDEO_FONT || 'Noto Sans Arabic';
+export const watermarkFor = (domain: string) => `صُنع بواسطة صوتك الذكي · ${domain}`;
 // Long clips get proportionally more time (rendering runs at roughly 2–6x real time)
-const renderTimeoutMs = (duration: number) => Math.max(3 * 60_000, duration * 1500 + 60_000);
+export const renderTimeoutMs = (duration: number) => Math.max(3 * 60_000, duration * 1500 + 60_000);
 
 // ---------- Audio timing: find where speech happens so captions follow the voice ----------
 
@@ -71,7 +77,7 @@ function readPcm(wav: Buffer): { samples: Int16Array; rate: number } {
 }
 
 /** Speech intervals in seconds (silences shorter than 250 ms are bridged). */
-function speechIntervals(wav: Buffer): { intervals: [number, number][]; duration: number } {
+export function speechIntervals(wav: Buffer): { intervals: [number, number][]; duration: number } {
   const { samples, rate } = readPcm(wav);
   const frame = Math.round(rate * 0.02);
   const levels: number[] = [];
@@ -99,9 +105,10 @@ function speechIntervals(wav: Buffer): { intervals: [number, number][]; duration
 }
 
 /** Splits text into short caption phrases (punctuation first, then at most ~6 words). */
-function captionChunks(text: string): string[] {
+export function captionChunks(text: string): string[] {
   const chunks: string[] = [];
-  for (const sentence of text.replace(/\s+/g, ' ').split(/(?<=[.!؟?،,…:;])\s+/)) {
+  // Performance tags ([excited], [short pause]…) are for the voice only, never shown on screen
+  for (const sentence of stripAudioTags(text).replace(/\s+/g, ' ').split(/(?<=[.!؟?،,…:;])\s+/)) {
     const words = sentence.trim().split(' ').filter(Boolean);
     let i = 0;
     while (i < words.length) {
@@ -144,7 +151,7 @@ function timeCaptions(text: string, wav: Buffer): { start: number; end: number; 
 
 // ---------- ASS subtitle file ----------
 
-const assTime = (t: number) => {
+export const assTime = (t: number) => {
   const cs = Math.max(0, Math.round(t * 100));
   const h = Math.floor(cs / 360000);
   const m = Math.floor((cs % 360000) / 6000);
@@ -153,7 +160,7 @@ const assTime = (t: number) => {
 };
 
 // Escape ASS override characters and force right-to-left so edge punctuation lands on the correct side
-const assText = (t: string) => '\u202B' + t.replace(/[{}\\]/g, '').replace(/\s+/g, ' ') + '\u202C';
+export const assText = (t: string) => '\u202B' + t.replace(/[{}\\]/g, '').replace(/\s+/g, ' ') + '\u202C';
 
 function buildAss(layout: Layout, captions: { start: number; end: number; text: string }[], duration: number, title: string, domain: string): string {
   const { width, height, fontSize, captionMarginV } = layout;
@@ -176,6 +183,80 @@ function buildAss(layout: Layout, captions: { start: number; end: number; text: 
     `Dialogue: 0,${assTime(0)},${assTime(duration)},Mark,,0,0,0,,${assText(watermarkFor(domain))}`,
   ];
   if (title) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},Title,,0,0,0,,${assText(title)}`);
+  for (const c of captions) lines.push(`Dialogue: 1,${assTime(c.start)},${assTime(c.end)},Caption,,0,0,0,,${assText(c.text)}`);
+  return lines.join('\n') + '\n';
+}
+
+// ---------- Greeting videos (occasion artwork, big headline, sender line) ----------
+
+/** "#rrggbb" -> ASS colour "&H00BBGGRR" */
+const assColor = (hex: string, alpha = '00') => {
+  const h = hex.replace('#', '');
+  return `&H${alpha}${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase();
+};
+
+// Positions on the 1080×1920 design (see greeting-art.ts), scaled with the render size
+const GREETING_TEXT = { titleTop: 140, titleSize: 112, waveTop: 1225, waveHeight: 170, captionsBottom: 330, captionSize: 60, fromBottom: 200, fromSize: 50 };
+
+/**
+ * Vertical layout of a greeting below the photo. On customer templates the photo can be anywhere, so the wave
+ * takes the space left between the photo and the captions; when that is too tight the captions (and the sender
+ * line) move lower, and if there is still no room the wave is left out — the photo matters more.
+ * The client preview (src/components/PhotoAdjuster.tsx) mirrors this rule.
+ */
+const TEMPLATE_WAVE_HEIGHT = 96;
+
+/** Height of the caption box for a font size (text line + box padding). */
+const captionBoxHeight = (captionSize: number) => Math.round(captionSize * 1.4 + 32);
+/** The sender line sits below the captions; it follows them when they move. */
+const fromBottomFor = (captionsBottom: number) =>
+  captionsBottom === GREETING_TEXT.captionsBottom ? GREETING_TEXT.fromBottom : captionsBottom === 200 ? 100 : Math.max(40, captionsBottom - 130);
+
+export function greetingLayout(
+  greeting: { template?: Buffer | null; photoBox?: PhotoBox; textStyle?: TextStyle }, hasPhoto: boolean
+) {
+  const t = GREETING_TEXT;
+  const style = greeting.textStyle ?? DEFAULT_TEXT_STYLE;
+  const custom = style.captionsBottom;
+  if (!greeting.template || !hasPhoto) {
+    const captionsBottom = custom ?? t.captionsBottom;
+    return { waveTop: t.waveTop, waveHeight: t.waveHeight, captionsBottom, fromBottom: fromBottomFor(captionsBottom) };
+  }
+  const box = greeting.photoBox ?? DEFAULT_PHOTO_BOX;
+  const waveTop = Math.round(box.cy + box.size / 2 + 30);
+  const room = (captionsBottom: number) => 1920 - captionsBottom - captionBoxHeight(style.captionSize) - 20 - waveTop;
+  // Placed by the customer: keep it; automatic: move the captions lower when the photo leaves no room
+  const captionsBottom = custom ?? (room(t.captionsBottom) < 90 ? 200 : t.captionsBottom);
+  // Thinner wave on customer designs, so it decorates instead of covering the template
+  const space = box.wave ? Math.min(TEMPLATE_WAVE_HEIGHT, room(captionsBottom)) : 0;
+  const waveHeight = space >= 50 ? Math.floor(space / 2) * 2 : 0;
+  return { waveTop, waveHeight, captionsBottom, fromBottom: fromBottomFor(captionsBottom) };
+}
+
+function buildGreetingAss(
+  scale: number, width: number, height: number, theme: GreetingTheme,
+  captions: { start: number; end: number; text: string }[], duration: number, title: string, from: string, domain: string,
+  place: { captionsBottom: number; fromBottom: number }, style: TextStyle, fromColor: string
+): string {
+  const t = { ...GREETING_TEXT, ...place, titleTop: style.titleTop, titleSize: style.titleSize, captionSize: style.captionSize };
+  const px = (n: number) => Math.round(n * scale);
+  const font = GREETING_FONTS[style.font];
+  const titleColor = style.titleColor ?? theme.title;
+  // Light headline: dark outline; dark headline (chosen for light templates): soft white outline
+  const titleOutline = isDarkColor(titleColor) ? '&H40FFFFFF' : '&H60000000';
+  const lines = [
+    '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${width}`, `PlayResY: ${height}`, 'WrapStyle: 0', '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Title,${font},${px(t.titleSize)},${assColor(titleColor)},&H00FFFFFF,${titleOutline},&H80000000,1,0,0,0,100,100,0,0,1,${px(4)},${px(3)},8,${px(70)},${px(70)},${px(t.titleTop)},-1`,
+    `Style: Caption,${font},${px(t.captionSize)},&H00FFFFFF,&H00FFFFFF,&H70000000,&H70000000,1,0,0,0,100,100,0,0,3,${px(16)},0,2,${px(80)},${px(80)},${px(t.captionsBottom)},-1`,
+    `Style: From,${font},${px(t.fromSize)},${assColor(fromColor)},&H00FFFFFF,${isDarkColor(fromColor) ? '&H40FFFFFF' : '&H60000000'},&H80000000,1,0,0,0,100,100,0,0,1,${px(3)},${px(2)},2,${px(60)},${px(60)},${px(t.fromBottom)},-1`,
+    `Style: Mark,${ARABIC_FONT},${px(30)},&H99FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,2,${px(40)},${px(40)},${px(60)},-1`,
+    '', '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    `Dialogue: 0,${assTime(0)},${assTime(duration)},Mark,,0,0,0,,${assText(watermarkFor(domain))}`,
+  ];
+  if (title) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},Title,,0,0,0,,${assText(title)}`);
+  if (from) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},From,,0,0,0,,${assText(from)}`);
   for (const c of captions) lines.push(`Dialogue: 1,${assTime(c.start)},${assTime(c.end)},Caption,,0,0,0,,${assText(c.text)}`);
   return lines.join('\n') + '\n';
 }
@@ -218,7 +299,7 @@ const MAX_WAITING = 4;
 
 export class RenderBusyError extends Error {}
 
-function runFfmpeg(
+export function runFfmpeg(
   args: string[],
   cwd: string,
   { timeoutMs, duration, onProgress }: { timeoutMs: number; duration: number; onProgress?: (fraction: number) => void }
@@ -246,8 +327,9 @@ function runFfmpeg(
 export interface RenderOptions {
   wav: Buffer;
   text: string;
-  image: Buffer;
+  image: Buffer | null;                  // required for normal videos; optional photo for greetings
   format: VideoFormat;
+  greeting?: { themeId: string; from?: string; template?: Buffer | null; photoBox?: PhotoBox; textStyle?: TextStyle }; // occasion greeting design (always vertical)
   title?: string;
   captions?: boolean;
   hd?: boolean;                          // 1080p/30fps instead of the faster 720p/24fps
@@ -257,36 +339,64 @@ export interface RenderOptions {
 }
 
 export async function renderVoiceVideo(opts: RenderOptions): Promise<Buffer> {
+  return enqueueRender(() => renderNow(opts), opts.onStart);
+}
+
+/** Runs a render through the shared one-at-a-time queue (the server is shared with other apps). */
+export function enqueueRender<T>(task: () => Promise<T>, onStart?: () => void): Promise<T> {
   if (waiting >= MAX_WAITING) throw new RenderBusyError('Render queue is full');
   waiting++;
-  const job = queue.then(() => { opts.onStart?.(); return renderNow(opts); });
+  const job = queue.then(() => { onStart?.(); return task(); });
   queue = job.catch(() => {}).finally(() => { waiting--; });
   return job;
 }
 
-async function renderNow({ wav, text, image, format, title = '', captions = true, hd = false, domain = 'tts.sillar.us', onProgress }: RenderOptions): Promise<Buffer> {
+async function renderNow({ wav, text, image, format, greeting, title = '', captions = true, hd = false, domain = 'tts.sillar.us', onProgress }: RenderOptions): Promise<Buffer> {
   const profile = hd ? RENDER_PROFILES.hd : RENDER_PROFILES.fast;
-  const layout = scaleLayout(LAYOUTS[format], profile.scale);
+  const theme = greeting ? GREETING_THEMES[greeting.themeId] : undefined;
+  const placement = greeting ? greetingLayout(greeting, Boolean(image)) : undefined;
+  const showWave = !placement || placement.waveHeight > 0;
+  // Sender line on customer templates: same contrast rule as the wave (deep theme colour on light designs)
+  const fromColor = !theme ? '#ffffff'
+    : greeting?.template ? await waveColorFor(greeting.template, Math.max(0, 1920 - placement!.fromBottom - 70), 60, theme)
+    : theme.accent;
+  const layout = theme
+    ? scaleLayout({ ...LAYOUTS.vertical, waveTop: placement!.waveTop, waveHeight: placement!.waveHeight || 2 }, profile.scale)
+    : scaleLayout(LAYOUTS[format], profile.scale);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), `sawtik-video-${crypto.randomBytes(4).toString('hex')}-`));
   try {
     const { duration } = speechIntervals(wav);
     const timed = captions ? timeCaptions(text, wav) : [];
     await Promise.all([
       fs.writeFile(path.join(dir, 'audio.wav'), wav),
-      fs.writeFile(path.join(dir, 'bg.png'), await buildBackground(layout, image)),
-      fs.writeFile(path.join(dir, 'subs.ass'), buildAss(layout, timed, duration, title.slice(0, 60), domain)),
+      fs.writeFile(path.join(dir, 'bg.png'), theme
+        ? await buildGreetingBackground(layout.width, layout.height, theme, greeting!.themeId, image, greeting!.template ?? null, greeting!.photoBox)
+        : await buildBackground(layout, image!)),
+      fs.writeFile(path.join(dir, 'subs.ass'), theme
+        ? buildGreetingAss(layout.width / GREETING_DESIGN.width, layout.width, layout.height, theme, timed, duration, title.slice(0, 60), (greeting!.from || '').slice(0, 40), domain, placement!, greeting!.textStyle ?? DEFAULT_TEXT_STYLE, fromColor)
+        : buildAss(layout, timed, duration, title.slice(0, 60), domain)),
     ]);
 
     const waveWidth = Math.round(layout.width * 0.8);
+    // On customer templates the wave colour adapts to the background so it never disappears
+    const waveColor = !theme ? '#F59E0B'
+      : greeting?.template && showWave ? await waveColorFor(greeting.template, placement!.waveTop, placement!.waveHeight, theme)
+      : theme.accent;
     const filter = [
       // Waveform in brand amber (showwaves output is already transparent). The volume boost only affects
       // the drawing — the audio track is mapped straight from the input.
       // Everything is composited in yuv420p (the output format) so frames aren't converted back and forth.
       // The backdrop is decoded once and repeated in memory (image2 "-loop 1" would re-decode the PNG every frame)
       `[0:v]format=yuv420p,loop=loop=-1:size=1:start=0,fps=${profile.fps}[bg]`,
-      `[1:a]volume=4,showwaves=s=${waveWidth}x${layout.waveHeight}:mode=cline:rate=${profile.fps}:colors=#F59E0B:scale=sqrt:draw=full,format=yuva420p[waves]`,
-      `[bg][waves]overlay=x=(W-w)/2:y=${layout.waveTop}:format=yuv420:shortest=1[v1]`,
-      `[v1]subtitles=subs.ass[vout]`,
+      ...(showWave ? [
+        // On customer templates the wave is softer (less boost, see-through) so it never turns into a solid block
+        `[1:a]volume=${greeting?.template ? 1.6 : 4},showwaves=s=${waveWidth}x${layout.waveHeight}:mode=cline:rate=${profile.fps}:colors=${greeting?.template ? `${waveColor}@0.6` : waveColor}:scale=sqrt:draw=full,format=yuva420p[waves]`,
+        `[bg][waves]overlay=x=(W-w)/2:y=${layout.waveTop}:format=yuv420:shortest=1[v1]`,
+        `[v1]subtitles=subs.ass[vout]`,
+      ] : [
+        // No room for a wave under a large photo: the video simply ends with the audio (-shortest)
+        `[bg]subtitles=subs.ass[vout]`,
+      ]),
     ].join(';');
 
     await runFfmpeg([
@@ -312,4 +422,11 @@ export async function normalizeImage(input: Buffer): Promise<Buffer> {
   const meta = await sharp(input).metadata();
   if (!meta.width || !meta.height) throw new Error('Unsupported image');
   return sharp(input).rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+}
+
+/** A customer's 9:16 greeting template, decoded and fitted to the 1080×1920 design (cropping any excess). */
+export async function normalizeTemplate(input: Buffer): Promise<Buffer> {
+  const meta = await sharp(input).metadata();
+  if (!meta.width || !meta.height) throw new Error('Unsupported image');
+  return sharp(input).rotate().resize(1080, 1920, { fit: 'cover', position: 'centre' }).png().toBuffer();
 }

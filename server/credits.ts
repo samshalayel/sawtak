@@ -1,4 +1,5 @@
-import { db, getSettings, transaction } from './db.ts';
+import { db, getSettings, transaction, POINTS_TO_SECONDS, secondsToPoints } from './db.ts';
+import { stripAudioTags } from '../src/utils/audioTags.ts';
 
 // Google meters Gemini TTS output at ~25 audio tokens per second; we bill users 1 credit per started second.
 export const AUDIO_TOKENS_PER_SECOND = 25;
@@ -8,7 +9,7 @@ const WORDS_PER_MINUTE = 80;
 
 // Rough pre-generation estimate used only to reserve credits; the final charge uses the real audio length.
 export function estimateSeconds(text: string, speed = 1): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const words = stripAudioTags(text).trim().split(/\s+/).filter(Boolean).length;
   return Math.max(2, Math.ceil((words / (WORDS_PER_MINUTE * Math.max(0.5, speed))) * 60));
 }
 
@@ -98,6 +99,23 @@ export function settleTtsCharge(usage: UsageInput & { audioSeconds: number }, he
     db.prepare("INSERT INTO credit_transactions (user_id, delta, balance_after, type, note, usage_id) VALUES (?, ?, ?, 'charge', ?, ?)")
       .run(usage.userId, -charge, credits, `توليد صوت (${usage.voice ?? ''})`, usageId);
     return { charged: charge, balance: credits };
+  });
+}
+
+/**
+ * Deduct a fixed point cost for a non-TTS service (greeting, motion, etc.).
+ * Throws InsufficientCreditsError if balance is too low.
+ */
+export function chargePoints(userId: number, points: number, note: string): number {
+  const seconds = Math.round(points * POINTS_TO_SECONDS);
+  return transaction(() => {
+    const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId) as { credits: number };
+    if (credits < seconds) throw new InsufficientCreditsError(seconds, credits);
+    db.prepare('UPDATE users SET credits = credits - ? WHERE id = ?').run(seconds, userId);
+    const after = credits - seconds;
+    db.prepare("INSERT INTO credit_transactions (user_id, delta, balance_after, type, note) VALUES (?, ?, ?, 'charge', ?)")
+      .run(userId, -seconds, after, note);
+    return secondsToPoints(after);
   });
 }
 
