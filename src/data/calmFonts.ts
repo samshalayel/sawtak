@@ -1,0 +1,47 @@
+// Caption fonts for calm reels: the three Noto faces the server always had, plus Arabic Google Fonts (OFL)
+// shipped in /fonts and installed system-wide in the container. Captions are drawn with Pango (server/calm-text.ts),
+// which shapes every one of these correctly; the page previews them through the Google Fonts CSS API.
+export interface CalmFont { id: string; label: string; family: string; bold: boolean; css: string }
+
+export const CALM_FONTS: CalmFont[] = [
+  { id: 'naskh', label: 'نسخ', family: 'Noto Naskh Arabic', bold: true, css: 'Noto+Naskh+Arabic:wght@700' },
+  { id: 'kufi', label: 'كوفي', family: 'Noto Kufi Arabic', bold: true, css: 'Noto+Kufi+Arabic:wght@700' },
+  { id: 'sans', label: 'حديث', family: 'Noto Sans Arabic', bold: true, css: 'Noto+Sans+Arabic:wght@700' },
+  { id: 'alexandria', label: 'الإسكندرية', family: 'Alexandria', bold: true, css: 'Alexandria:wght@700' },
+  { id: 'almarai', label: 'المراعي', family: 'Almarai Bold', bold: false, css: 'Almarai:wght@700' },
+  { id: 'amiri', label: 'أميري', family: 'Amiri', bold: true, css: 'Amiri:wght@700' },
+  { id: 'arefruqaa', label: 'عارف رقعة', family: 'Aref Ruqaa', bold: true, css: 'Aref+Ruqaa:wght@700' },
+  { id: 'badeendisplay', label: 'بديع', family: 'Badeen Display', bold: false, css: 'Badeen+Display:wght@400' },
+  { id: 'baloobhaijaan2', label: 'بالو', family: 'Baloo Bhaijaan 2', bold: true, css: 'Baloo+Bhaijaan+2:wght@700' },
+  { id: 'blaka', label: 'بلاكا', family: 'Blaka', bold: false, css: 'Blaka:wght@400' },
+  { id: 'cairo', label: 'القاهرة', family: 'Cairo', bold: true, css: 'Cairo:wght@700' },
+  { id: 'changa', label: 'تشانجا', family: 'Changa', bold: true, css: 'Changa:wght@700' },
+  { id: 'elmessiri', label: 'المسيري', family: 'El Messiri', bold: true, css: 'El+Messiri:wght@700' },
+  { id: 'gulzar', label: 'جلزار', family: 'Gulzar', bold: false, css: 'Gulzar:wght@400' },
+  { id: 'harmattan', label: 'هرمتان', family: 'Harmattan', bold: true, css: 'Harmattan:wght@700' },
+  { id: 'ibmplexsansarabic', label: 'بليكس', family: 'IBM Plex Sans Arabic', bold: true, css: 'IBM+Plex+Sans+Arabic:wght@700' },
+  { id: 'jomhuria', label: 'جمهورية', family: 'Jomhuria', bold: false, css: 'Jomhuria:wght@400' },
+  { id: 'katibeh', label: 'كاتبة', family: 'Katibeh', bold: false, css: 'Katibeh:wght@400' },
+  { id: 'kufam', label: 'كوفام', family: 'Kufam', bold: true, css: 'Kufam:wght@700' },
+  { id: 'lalezar', label: 'لاله زار', family: 'Lalezar', bold: false, css: 'Lalezar:wght@400' },
+  { id: 'lateef', label: 'لطيف', family: 'Lateef', bold: true, css: 'Lateef:wght@700' },
+  { id: 'lemonada', label: 'ليمونادة', family: 'Lemonada', bold: true, css: 'Lemonada:wght@700' },
+  { id: 'mada', label: 'مدى', family: 'Mada', bold: true, css: 'Mada:wght@700' },
+  { id: 'marhey', label: 'مرحى', family: 'Marhey', bold: true, css: 'Marhey:wght@700' },
+  { id: 'markazitext', label: 'مركزي', family: 'Markazi Text', bold: true, css: 'Markazi+Text:wght@700' },
+  { id: 'mirza', label: 'ميرزا', family: 'Mirza', bold: true, css: 'Mirza:wght@700' },
+  { id: 'notonastaliqurdu', label: 'نستعليق', family: 'Noto Nastaliq Urdu', bold: true, css: 'Noto+Nastaliq+Urdu:wght@700' },
+  { id: 'playpensansarabic', label: 'بلاي بن', family: 'Playpen Sans Arabic', bold: true, css: 'Playpen+Sans+Arabic:wght@700' },
+  { id: 'qahiri', label: 'قاهري', family: 'Qahiri', bold: false, css: 'Qahiri:wght@400' },
+  { id: 'rakkas', label: 'رقاص', family: 'Rakkas', bold: false, css: 'Rakkas:wght@400' },
+  { id: 'readexpro', label: 'ريدكس', family: 'Readex Pro', bold: true, css: 'Readex+Pro:wght@700' },
+  { id: 'reemkufi', label: 'ريم كوفي', family: 'Reem Kufi', bold: true, css: 'Reem+Kufi:wght@700' },
+  { id: 'reemkufifun', label: 'ريم كوفي مرح', family: 'Reem Kufi Fun', bold: true, css: 'Reem+Kufi+Fun:wght@700' },
+  { id: 'ruwudu', label: 'رودو', family: 'Ruwudu', bold: true, css: 'Ruwudu:wght@700' },
+  { id: 'scheherazadenew', label: 'شهرزاد', family: 'Scheherazade New', bold: true, css: 'Scheherazade+New:wght@700' },
+  { id: 'tajawal', label: 'تجوال', family: 'Tajawal', bold: true, css: 'Tajawal:wght@700' },
+  { id: 'vibes', label: 'فايبز', family: 'Vibes', bold: false, css: 'Vibes:wght@400' },
+  { id: 'zain', label: 'زين', family: 'Zain', bold: true, css: 'Zain:wght@700' },
+];
+
+export const calmFont = (id: string) => CALM_FONTS.find(f => f.id === id) ?? CALM_FONTS[0];
