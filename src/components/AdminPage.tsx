@@ -11,7 +11,8 @@ import { CustomVoicesTab } from './CustomVoicesTab';
 import { MotionTab } from './MotionTab';
 import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
-import { PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
+import { JawwalPaymentsCard } from './JawwalPaymentsCard';
+import { CUSTOMER_PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
 
 type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark';
 
@@ -251,6 +252,8 @@ const Overview: React.FC = () => {
           </div>
         ))}
       </div>
+
+      <JawwalPaymentsCard />
 
       {tokensPerSecond !== null && (
         <p className="text-xs text-slate-400">
@@ -609,7 +612,7 @@ const UserManager: React.FC<{
         )}
         <div className="text-xs font-bold text-white">شحن باقة (تشمل هدية العرض إن وُجدت)</div>
         <div className="flex flex-wrap gap-1.5">
-          {PACKAGES.map(pkg => {
+          {CUSTOMER_PACKAGES.map(pkg => {
             const bonus = packageBonusMinutes(pkg);
             return (
               <button

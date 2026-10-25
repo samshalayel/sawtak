@@ -10,17 +10,24 @@ export interface CreditPackage {
   priceIls: number;
   bonusPoints: number;  // bonus points while offer is active
   popular?: boolean;
+  adminOnly?: boolean;  // shown and payable only by admins (a real ₪1 payment to test the gateway)
 }
 
 // Launch offer: bonus points until the end of 2026 (Jerusalem time)
 export const OFFER_ENDS_AT = new Date('2026-12-31T23:59:59+02:00');
 
+// The single price list: the server charges exactly these prices (server/jawwal.ts imports this file)
 export const PACKAGES: CreditPackage[] = [
-  { id: 'p50',  points: 500,  priceIls: 1,   bonusPoints: 0   },
+  { id: 'p50',  points: 500,  priceIls: 10,  bonusPoints: 0   },
   { id: 'p100', points: 1000, priceIls: 20,  bonusPoints: 100 },
   { id: 'p250', points: 2500, priceIls: 50,  bonusPoints: 500, popular: true },
   { id: 'p500', points: 5000, priceIls: 100, bonusPoints: 1000 },
+  { id: 'test1', points: 50,  priceIls: 1,   bonusPoints: 0, adminOnly: true },
 ];
+
+/** Packages an account may see and buy (customers never see the admin test package). */
+export const packagesFor = (isAdmin: boolean) => PACKAGES.filter(p => isAdmin || !p.adminOnly);
+export const CUSTOMER_PACKAGES = packagesFor(false);
 
 export const WORDS_PER_MINUTE_TYPICAL = 100;
 

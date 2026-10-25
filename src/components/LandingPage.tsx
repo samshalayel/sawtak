@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, AudioLines, Mic2, Languages, Users, Wand2, Copy, Film, Gift, ArrowLeft, Check, Headphones, PenLine, Download, Cake, Moon, TreePine, Gem, GraduationCap, PartyPopper } from 'lucide-react';
 import { VOICES } from '../data/presets';
-import { PACKAGES, isOfferActive, packageBaseMinutes, packageBonusMinutes, packageTotalMinutes } from '../data/packages';
+import { CUSTOMER_PACKAGES, isOfferActive, packageBaseMinutes, packageBonusMinutes, packageTotalMinutes } from '../data/packages';
 
 interface LandingPageProps {
   isLoggedIn: boolean;
@@ -254,7 +254,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
           )}
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {PACKAGES.map((p, i) => {
+          {CUSTOMER_PACKAGES.map((p, i) => {
             const bonus = packageBonusMinutes(p);
             return (
               <div

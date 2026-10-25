@@ -39,7 +39,7 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     delta INTEGER NOT NULL,
     balance_after INTEGER NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('signup_bonus', 'admin_grant', 'charge')),
+    type TEXT NOT NULL CHECK (type IN ('signup_bonus', 'admin_grant', 'charge', 'purchase')),
     note TEXT NOT NULL DEFAULT '',
     admin_id INTEGER REFERENCES users(id),
     usage_id INTEGER REFERENCES usage_events(id),
@@ -138,6 +138,29 @@ if (!hasColumn('users', 'google_sub')) {
         db.exec('DROP TABLE usage_events');
         db.exec('ALTER TABLE usage_events_new RENAME TO usage_events');
         db.exec('CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_id, created_at)');
+      });
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+}
+// credit_transactions.type gained 'purchase' (points bought through a payment gateway), rebuilt the same way
+{
+  const OLD_TYPE_CHECK = "CHECK (type IN ('signup_bonus', 'admin_grant', 'charge'))";
+  const NEW_TYPE_CHECK = "CHECK (type IN ('signup_bonus', 'admin_grant', 'charge', 'purchase'))";
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'credit_transactions'").get() as { sql: string };
+  if (row.sql.includes(OLD_TYPE_CHECK)) {
+    const createNew = row.sql
+      .replace(OLD_TYPE_CHECK, NEW_TYPE_CHECK)
+      .replace(/CREATE TABLE\s+"?credit_transactions"?/, 'CREATE TABLE credit_transactions_new');
+    db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      transaction(() => {
+        db.exec(createNew);
+        db.exec('INSERT INTO credit_transactions_new SELECT * FROM credit_transactions');
+        db.exec('DROP TABLE credit_transactions');
+        db.exec('ALTER TABLE credit_transactions_new RENAME TO credit_transactions');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_tx_user ON credit_transactions(user_id, created_at)');
       });
     } finally {
       db.exec('PRAGMA foreign_keys = ON');
@@ -530,4 +553,57 @@ export function listBenchmarkRuns(limit = 30): BenchmarkRun[] {
     totalCostUsd: r.total_cost_usd,
     spans: JSON.parse(r.spans || '[]'),
   }));
+}
+
+// ---------- Jawwal Pay payments ----------
+// One row per payment attempt, so every charge can be traced and a charge that was not credited is never lost.
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS jawwal_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    package_id TEXT NOT NULL,
+    amount_ils REAL NOT NULL,
+    credits INTEGER NOT NULL,          -- seconds to add once paid
+    phone_last4 TEXT NOT NULL,         -- enough to recognise the payer; the full number is not kept
+    msg_id TEXT NOT NULL,
+    -- unknown: the gateway did not answer the payment call, so it may or may not have charged (check in Jawwal Pay)
+    status TEXT NOT NULL CHECK (status IN ('pending', 'credited', 'failed', 'charged_not_credited', 'unknown')),
+    tx_id TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_jawwal_user ON jawwal_payments(user_id, created_at);
+`);
+
+export interface JawwalPaymentRow {
+  id: number; user_id: number; package_id: string; amount_ils: number; credits: number; phone_last4: string;
+  msg_id: string; status: 'pending' | 'credited' | 'failed' | 'charged_not_credited' | 'unknown'; tx_id: string | null; error: string | null;
+  created_at: string; updated_at: string;
+}
+
+export function startJawwalPayment(p: { userId: number; packageId: string; amountIls: number; credits: number; phone: string; msgId: string }): number {
+  const r = db.prepare(`
+    INSERT INTO jawwal_payments (user_id, package_id, amount_ils, credits, phone_last4, msg_id, status)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+  `).run(p.userId, p.packageId, p.amountIls, p.credits, p.phone.replace(/\D/g, '').slice(-4), p.msgId);
+  return Number(r.lastInsertRowid);
+}
+
+export function updateJawwalPayment(id: number, patch: { status: JawwalPaymentRow['status']; txId?: string | null; error?: string | null }) {
+  db.prepare("UPDATE jawwal_payments SET status = ?, tx_id = COALESCE(?, tx_id), error = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(patch.status, patch.txId ?? null, patch.error ?? null, id);
+}
+
+/** A payment of this user still waiting for the gateway (stops a double tap from charging twice). */
+export function pendingJawwalPayment(userId: number, withinSeconds = 120): JawwalPaymentRow | undefined {
+  return db.prepare(`SELECT * FROM jawwal_payments WHERE user_id = ? AND status = 'pending' AND created_at > datetime('now', ?) ORDER BY id DESC LIMIT 1`)
+    .get(userId, `-${withinSeconds} seconds`) as unknown as JawwalPaymentRow | undefined;
+}
+
+export function listJawwalPayments(limit = 100): (JawwalPaymentRow & { email: string })[] {
+  return db.prepare(`
+    SELECT p.*, u.email FROM jawwal_payments p JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT ?
+  `).all(limit) as unknown as (JawwalPaymentRow & { email: string })[];
 }

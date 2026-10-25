@@ -119,6 +119,22 @@ export function chargePoints(userId: number, points: number, note: string): numb
   });
 }
 
+/**
+ * Points bought through Jawwal Pay: the balance, the ledger line and the payment row change together or not at all.
+ * (No admin is involved, so admin_id stays empty; 0 would break the users foreign key.)
+ */
+export function creditPurchase(paymentId: number, userId: number, amount: number, txId: string | null, note: string): number {
+  return transaction(() => {
+    db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(amount, userId);
+    const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId) as { credits: number };
+    db.prepare("INSERT INTO credit_transactions (user_id, delta, balance_after, type, note) VALUES (?, ?, ?, 'purchase', ?)")
+      .run(userId, amount, credits, note);
+    db.prepare("UPDATE jawwal_payments SET status = 'credited', tx_id = ?, error = NULL, updated_at = datetime('now') WHERE id = ?")
+      .run(txId, paymentId);
+    return credits;
+  });
+}
+
 export function grantCredits(userId: number, amount: number, adminId: number, note: string) {
   return transaction(() => {
     db.prepare('UPDATE users SET credits = MAX(credits + ?, 0) WHERE id = ?').run(amount, userId);

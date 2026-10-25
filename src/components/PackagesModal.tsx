@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Gift, Sparkles, Timer, Smartphone } from 'lucide-react';
 import {
-  PACKAGES,
+  CUSTOMER_PACKAGES,
+  packagesFor,
   OFFER_ENDS_AT,
   isOfferActive,
   offerDaysLeft,
@@ -22,7 +23,9 @@ interface PackagesModalProps {
 export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onLoginRequired, onPurchaseSuccess }) => {
   const offerActive = isOfferActive();
   const daysLeft = offerDaysLeft();
-  const basePerPoint = PACKAGES[0].priceIls / PACKAGES[0].points;
+  const basePerPoint = CUSTOMER_PACKAGES[0].priceIls / CUSTOMER_PACKAGES[0].points;
+  // Admins also see the ₪1 test package (a real payment to check the gateway)
+  const shown = packagesFor(user?.role === 'admin');
   const needsVerification = Boolean(user) && !user!.emailVerified;
 
   const [payingPkg, setPayingPkg] = React.useState<CreditPackage | null>(null);
@@ -76,11 +79,11 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onL
         )}
 
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {PACKAGES.map((pkg) => {
+          {shown.map((pkg) => {
             const bonus = packageBonusPoints(pkg);
             const total = packageTotalPoints(pkg);
             const perPoint = pkg.priceIls / total;
-            const savingPct = Math.round((1 - perPoint / basePerPoint) * 100);
+            const savingPct = pkg.adminOnly ? 0 : Math.round((1 - perPoint / basePerPoint) * 100);
 
             return (
               <div
@@ -91,6 +94,11 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onL
                     : 'bg-slate-950/60 border-slate-800'
                 }`}
               >
+                {pkg.adminOnly && (
+                  <span className="absolute -top-2.5 right-4 bg-sky-500 text-slate-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    تجربة الدفع (للأدمن فقط)
+                  </span>
+                )}
                 {pkg.popular && (
                   <span className="absolute -top-2.5 right-4 bg-amber-500 text-slate-950 text-[10px] font-bold px-2 py-0.5 rounded-full">
                     الأكثر طلباً
