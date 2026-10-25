@@ -168,7 +168,7 @@ export function createPressRouter(deps: PressDeps) {
           return { speaker: format === 'summary' ? 0 : (Number(l?.speaker) === 1 ? 1 : 0), text: format === 'podcast' ? keepKnownAudioTags(text) : stripAudioTags(text).trim() };
         })
         .filter((l: { text: string }) => l.text);
-      if (lines.length === 0) return res.status(502).json({ success: false, error: 'تعذّر تحويل المقال، جرّب مرة أخرى' });
+      if (lines.length === 0) return res.status(503).json({ success: false, error: 'تعذّر تحويل المقال، جرّب مرة أخرى' });
 
       res.json({
         success: true,

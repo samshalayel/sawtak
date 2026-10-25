@@ -91,6 +91,9 @@ function customerError(e: unknown) {
   return e instanceof GatewayRefusal ? e.message : UNAVAILABLE;
 }
 
+// Never 502/504: Cloudflare replaces those with its own page, and the customer would lose our message
+const failureStatus = (e: unknown) => (e instanceof GatewayRefusal ? 400 : 503);
+
 // ── packages and input ───────────────────────────────────────────────────────
 
 /** A package this account may buy (the admin test package is refused for everyone else). */
@@ -118,7 +121,7 @@ jawwalRouter.post('/otp', async (req: Request, res: Response) => {
     res.json({ success: true });
   } catch (e: any) {
     console.error(`[jawwal] send_otp failed (${MODE}):`, e?.message);
-    res.status(502).json({ success: false, error: customerError(e) });
+    res.status(failureStatus(e)).json({ success: false, error: customerError(e) });
   }
 });
 
@@ -150,7 +153,7 @@ jawwalRouter.post('/pay', async (req: Request, res: Response) => {
     const refused = e instanceof GatewayRefusal;
     updateJawwalPayment(paymentId, { status: refused ? 'failed' : 'unknown', error: String(e?.message || e).slice(0, 300) });
     console.error(`[jawwal] MFP ${refused ? 'refused' : 'no answer'} (${MODE}) payment #${paymentId}:`, e?.message);
-    return res.status(502).json({
+    return res.status(failureStatus(e)).json({
       success: false,
       error: refused ? customerError(e) : `لم تصلنا نتيجة الدفع. إن خُصم المبلغ من محفظتك فسنضيف نقاطك بعد التحقق (رقم المرجع ${paymentId}).`,
     });

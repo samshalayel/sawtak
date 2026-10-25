@@ -151,7 +151,7 @@ quranRouter.get('/options', async (_req, res) => {
     res.json({ success: true, surahs: await quranSurahs(), reciters: QURAN_RECITERS, topics: QURAN_TOPICS });
   } catch (err: any) {
     console.error('Quran surahs failed:', err?.message);
-    res.status(502).json({ success: false, error: 'تعذّر جلب قائمة السور، حاول بعد قليل' });
+    res.status(503).json({ success: false, error: 'تعذّر جلب قائمة السور، حاول بعد قليل' });
   }
 });
 
@@ -167,7 +167,7 @@ quranRouter.get('/verses', async (req, res) => {
     res.json({ success: true, surah: pick.surah, surahName: name, verses });
   } catch (err: any) {
     console.error('Quran verses failed:', err?.message);
-    res.status(502).json({ success: false, error: 'تعذّر جلب الآيات، حاول بعد قليل' });
+    res.status(503).json({ success: false, error: 'تعذّر جلب الآيات، حاول بعد قليل' });
   }
 });
 
@@ -182,6 +182,6 @@ quranRouter.get('/audio/:reciter/:surah/:verse', async (req, res) => {
     res.type('audio/mpeg').set('Cache-Control', 'private, max-age=86400').sendFile(await verseAudio(req.params.reciter, surah, verse));
   } catch (err: any) {
     console.error('Quran audio failed:', err?.message);
-    res.status(502).json({ success: false, error: 'تعذّر تحميل التلاوة' });
+    res.status(503).json({ success: false, error: 'تعذّر تحميل التلاوة' });
   }
 });

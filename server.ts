@@ -346,7 +346,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
       releaseCredits(user.id, held);
       held = 0;
       logUsage({ userId: user.id, feature: 'tts', model: TTS_MODEL, voice, chars: text.length, ...usageTokens(response), status: 'failed', apiKeyId: keyId });
-      return res.status(502).json({
+      return res.status(503).json({
         success: false,
         error: 'لم يتم استلام مقطع صوتي من النموذج. يرجى تجربة نص آخر أو تعديل النبرة.'
       });
@@ -481,7 +481,7 @@ app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res
       releaseCredits(user.id, held);
       held = 0;
       logUsage({ userId: user.id, feature: 'dialogue', model: TTS_MODEL, voice: voiceLabel, chars: fullText.length, ...usageTokens(response), status: 'failed', apiKeyId: keyId });
-      return res.status(502).json({ success: false, error: 'لم يتم استلام مقطع صوتي من النموذج. يرجى تعديل الحوار والمحاولة مجدداً.' });
+      return res.status(503).json({ success: false, error: 'لم يتم استلام مقطع صوتي من النموذج. يرجى تعديل الحوار والمحاولة مجدداً.' });
     }
 
     const wav = toWavBuffer(audioPart.inlineData.data, audioPart.inlineData.mimeType);
@@ -582,7 +582,7 @@ ${names[1]}: ...`;
       .filter(l => names.some((n: string) => l.startsWith(`${n}:`) || l.startsWith(`${n} :`)))
       .join('\n');
 
-    if (!script) return res.status(502).json({ success: false, error: 'تعذّرت كتابة الحوار، جرّب موضوعاً آخر' });
+    if (!script) return res.status(503).json({ success: false, error: 'تعذّرت كتابة الحوار، جرّب موضوعاً آخر' });
     res.json({ success: true, script });
   } catch (err: any) {
     sendFriendlyError(res, err, 'Write dialogue error');
