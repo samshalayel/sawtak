@@ -12,7 +12,7 @@ import {
   ArrowRight,
   Package,
   Sun,
-  Moon, Clapperboard } from 'lucide-react';
+  Moon, Clapperboard, Eye, EyeOff } from 'lucide-react';
 import { AuthUser, formatCredits } from '../types/auth';
 import { isOfferActive } from '../data/packages';
 import { getTheme, setTheme, Theme } from '../utils/theme';
@@ -26,6 +26,9 @@ interface HeaderProps {
   view: 'studio' | 'admin' | 'motion';
   /** False when the motion service is stopped (the link is hidden). */
   motionOn?: boolean;
+  /** Admins only: browse the site as a customer sees it (stopped services hidden). */
+  viewAsCustomer?: boolean;
+  onToggleViewAsCustomer?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -36,6 +39,8 @@ export const Header: React.FC<HeaderProps> = ({
   onPackagesClick,
   view,
   motionOn = true,
+  viewAsCustomer = false,
+  onToggleViewAsCustomer,
 }) => {
   const offerActive = isOfferActive();
   const [showGuide, setShowGuide] = useState(false);
@@ -109,6 +114,20 @@ export const Header: React.FC<HeaderProps> = ({
                     {view === 'motion' ? <ArrowRight className="w-3.5 h-3.5" /> : <Clapperboard className="w-3.5 h-3.5" />}
                     <span className="hidden sm:inline">{view === 'motion' ? 'الاستوديو' : 'موشن جرافيك'}</span>
                   </a>
+                )}
+
+                {user.role === 'admin' && onToggleViewAsCustomer && (
+                  <button
+                    type="button"
+                    onClick={onToggleViewAsCustomer}
+                    title={viewAsCustomer ? 'رجوع لعرض الأدمن' : 'شاهد الموقع كما يراه الزبون (الخدمات الموقفة مخفية)'}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      viewAsCustomer ? 'border-sky-500/60 bg-sky-500/10 text-sky-300' : 'border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                    }`}
+                  >
+                    {viewAsCustomer ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span className="hidden sm:inline">{viewAsCustomer ? 'إنهاء عرض الزبون' : 'عرض كزبون'}</span>
+                  </button>
                 )}
 
                 {user.role === 'admin' && (

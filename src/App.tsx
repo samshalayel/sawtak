@@ -88,8 +88,14 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
   const [config, setConfig] = useState<PublicConfig>({ signupBonusCredits: 0, maxTextChars: 3000, contactWhatsapp: '', googleEnabled: false, prices: DEFAULT_PRICES });
+  // Admins can browse as a customer: stopped services then hide for them too (kept per browser)
+  const [viewAsCustomer, setViewAsCustomer] = useState(() => localStorage.getItem('sawtik_view_as_customer') === '1');
+  const toggleViewAsCustomer = () => setViewAsCustomer(v => {
+    localStorage.setItem('sawtik_view_as_customer', v ? '0' : '1');
+    return !v;
+  });
   // A stopped service is hidden from customers; admins keep using it to test (the server enforces the same rule)
-  const serviceOn = (id: ServiceId) => user?.role === 'admin' || config.services?.[id] !== false;
+  const serviceOn = (id: ServiceId) => (user?.role === 'admin' && !viewAsCustomer) || config.services?.[id] !== false;
   const [showPackages, setShowPackages] = useState(false);
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
@@ -671,10 +677,22 @@ export default function App() {
         user={user}
         view={isAdminView ? 'admin' : view === 'motion' ? 'motion' : 'studio'}
         motionOn={serviceOn('motion')}
+        viewAsCustomer={user?.role === 'admin' && viewAsCustomer}
+        onToggleViewAsCustomer={toggleViewAsCustomer}
         onLoginClick={() => setAuthPrompt({ mode: 'login' })}
         onLogout={handleLogout}
         onPackagesClick={() => setShowPackages(true)}
       />
+
+      {/* Admin browsing as a customer */}
+      {user?.role === 'admin' && viewAsCustomer && (
+        <div className="bg-sky-500/10 border-b border-sky-500/30 px-4 py-2">
+          <div className="max-w-4xl mx-auto flex items-center justify-between flex-wrap gap-2 text-xs sm:text-sm text-sky-200">
+            <span>👁️ تشاهد الموقع كما يراه الزبون: الخدمات الموقفة مخفية عنك الآن.</span>
+            <button type="button" onClick={toggleViewAsCustomer} className="px-3 py-1 rounded-lg bg-sky-500 text-slate-950 text-xs font-bold">إنهاء عرض الزبون</button>
+          </div>
+        </div>
+      )}
 
       {/* Unverified email banner */}
       {user && !user.emailVerified && (
