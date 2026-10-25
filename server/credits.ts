@@ -1,8 +1,30 @@
 import { db, getSettings, transaction, POINTS_TO_SECONDS, secondsToPoints } from './db.ts';
 import { stripAudioTags } from '../src/utils/audioTags.ts';
 
-// Google meters Gemini TTS output at ~25 audio tokens per second; we bill users 1 credit per started second.
+// Google meters Gemini TTS output at ~25 audio tokens per second.
 export const AUDIO_TOKENS_PER_SECOND = 25;
+
+// Balances are stored in seconds of credit (1 point = POINTS_TO_SECONDS of them); prices are set in points.
+
+/** Credit for `audioSeconds` of generated voice at the admin's price (costTtsPerMinute points per minute). */
+export function voiceCredits(audioSeconds: number): number {
+  const { costTtsPerMinute } = getSettings();
+  return Math.max(1, Math.ceil((audioSeconds * costTtsPerMinute * POINTS_TO_SECONDS) / 60));
+}
+
+/** Credit for a fixed price in points. */
+export const pointsCredits = (points: number) => Math.round(points * POINTS_TO_SECONDS);
+
+/** Points for a credit amount, for messages ("12 نقطة"); one decimal when it is not whole. */
+export function pointsText(credits: number): string {
+  const pts = Math.round((credits / POINTS_TO_SECONDS) * 10) / 10;
+  return `${pts.toLocaleString('en-US')} نقطة`;
+}
+
+/** Credit to hold before generating `text`: the voice price, or a fixed service price when that is higher. */
+export function estimateCredits(text: string, speed = 1, minPoints = 0): number {
+  return Math.max(voiceCredits(estimateSeconds(text, speed)), pointsCredits(minPoints));
+}
 
 // Calibrated against real Gemini TTS output (49–116 wpm depending on tone); keep in sync with src/utils/audio.ts
 const WORDS_PER_MINUTE = 80;
@@ -87,17 +109,18 @@ export function logUsage(input: UsageInput, creditsCharged = 0): number {
 }
 
 /**
- * Converts a hold into the final charge: 1 credit per started second of generated audio.
- * If the audio ran longer than the hold, the extra is taken from the remaining balance (never below zero).
+ * Converts a hold into the final charge: the voice price for the real audio length, or the service's fixed price
+ * (a greeting card, a calm reel) when that is higher. If the charge is above the hold, the extra is taken from the
+ * remaining balance (never below zero).
  */
-export function settleTtsCharge(usage: UsageInput & { audioSeconds: number }, held: number) {
-  const charge = Math.max(1, Math.ceil(usage.audioSeconds));
+export function settleTtsCharge(usage: UsageInput & { audioSeconds: number }, held: number, service?: { minPoints: number; note: string }) {
+  const charge = Math.max(voiceCredits(usage.audioSeconds), pointsCredits(service?.minPoints ?? 0));
   return transaction(() => {
     db.prepare('UPDATE users SET credits = MAX(credits + ? - ?, 0) WHERE id = ?').run(held, charge, usage.userId);
     const usageId = logUsage(usage, charge);
     const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(usage.userId) as { credits: number };
     db.prepare("INSERT INTO credit_transactions (user_id, delta, balance_after, type, note, usage_id) VALUES (?, ?, ?, 'charge', ?, ?)")
-      .run(usage.userId, -charge, credits, `توليد صوت (${usage.voice ?? ''})`, usageId);
+      .run(usage.userId, -charge, credits, service?.note ?? `توليد صوت (${usage.voice ?? ''})`, usageId);
     return { charged: charge, balance: credits };
   });
 }
@@ -107,7 +130,7 @@ export function settleTtsCharge(usage: UsageInput & { audioSeconds: number }, he
  * Throws InsufficientCreditsError if balance is too low.
  */
 export function chargePoints(userId: number, points: number, note: string): number {
-  const seconds = Math.round(points * POINTS_TO_SECONDS);
+  const seconds = pointsCredits(points);
   return transaction(() => {
     const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId) as { credits: number };
     if (credits < seconds) throw new InsufficientCreditsError(seconds, credits);

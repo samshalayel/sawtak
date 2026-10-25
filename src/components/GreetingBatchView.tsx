@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Download, FileArchive, Loader2, Square, Trash2, XCircle, RotateCcw } from 'lucide-react';
+import { formatCredits } from '../types/auth';
 
 // Progress and downloads of a bulk greeting job (server/greeting-batch.ts).
 
@@ -89,7 +90,7 @@ export const GreetingBatchView: React.FC<Props> = ({ batch, onUpdate, onBalanceR
         <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
           <div className="h-full bg-gradient-to-l from-amber-400 to-amber-600 transition-all duration-700" style={{ width: `${Math.max(3, percent)}%` }} />
         </div>
-        <div className="text-[11px] text-slate-500">الرصيد المستخدم حتى الآن: {batch.creditsUsed} ثانية</div>
+        <div className="text-[11px] text-slate-500">الرصيد المستخدم حتى الآن: {formatCredits(batch.creditsUsed)}</div>
         {batch.stopReason && <div className="text-xs text-rose-200 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">{batch.stopReason}</div>}
 
         <div className="flex flex-wrap gap-2 pt-1">

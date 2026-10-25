@@ -14,7 +14,7 @@ const { adminRouter, motionStatsRouter } = await import('./server/admin.ts');
 const { getSettings, getUserById } = await import('./server/db.ts');
 const {
   estimateSeconds, pcmSeconds, reserveCredits, releaseCredits, settleTtsCharge, logUsage,
-  InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND
+  InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND, estimateCredits, pointsText, chargePoints
 } = await import('./server/credits.ts');
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
@@ -321,14 +321,17 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
       return res.status(429).json({ success: false, error: 'طلبات كثيرة خلال وقت قصير، يرجى الانتظار دقيقة ثم المحاولة.' });
     }
 
+    // A greeting card's voice costs the card price (or the voice price if a long text costs more)
+    const greetingCard = req.body.purpose === 'greeting' ? { minPoints: getSettings().costGreeting, note: 'بطاقة تهنئة' } : undefined;
+
     try {
-      held = reserveCredits(user.id, estimateSeconds(text, Number(speed) || 1));
+      held = reserveCredits(user.id, estimateCredits(text, Number(speed) || 1, greetingCard?.minPoints ?? 0));
     } catch (err) {
       if (err instanceof InsufficientCreditsError) {
         return res.status(402).json({
           success: false,
           code: 'INSUFFICIENT_CREDITS',
-          error: `رصيدك غير كافٍ. يحتاج هذا النص حوالي ${err.needed} ثانية ورصيدك ${err.balance} ثانية.`,
+          error: `رصيدك غير كافٍ. يحتاج ${greetingCard ? 'هذا الطلب' : 'هذا النص'} حوالي ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.`,
           needed: err.needed,
           balance: err.balance
         });
@@ -366,7 +369,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
       outputTokens: tokens.outputTokens || Math.round(audioSeconds * AUDIO_TOKENS_PER_SECOND),
       audioSeconds,
       apiKeyId: keyId,
-    }, held);
+    }, held, greetingCard);
     held = 0;
 
     res.json({
@@ -438,13 +441,13 @@ app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res
 
     try {
       // Conversations include turn-taking pauses, so allow a little extra on the estimate
-      held = reserveCredits(user.id, Math.ceil(estimateSeconds(fullText, Number(speed) || 1) * 1.1));
+      held = reserveCredits(user.id, Math.ceil(estimateCredits(fullText, Number(speed) || 1) * 1.1));
     } catch (err) {
       if (err instanceof InsufficientCreditsError) {
         return res.status(402).json({
           success: false,
           code: 'INSUFFICIENT_CREDITS',
-          error: `رصيدك غير كافٍ. يحتاج هذا الحوار حوالي ${err.needed} ثانية ورصيدك ${err.balance} ثانية.`,
+          error: `رصيدك غير كافٍ. يحتاج هذا الحوار حوالي ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.`,
           needed: err.needed,
           balance: err.balance,
         });
@@ -900,10 +903,10 @@ app.post('/api/press/overlay/render', requireAuth, requireVerifiedEmail, async (
     if (introOn) {
       let held = 0;
       try {
-        held = reserveCredits(req.user!.id, estimateSeconds(introText));
+        held = reserveCredits(req.user!.id, estimateCredits(introText));
       } catch (err) {
         if (err instanceof InsufficientCreditsError) {
-          return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ لصوت المذيع (يحتاج حوالي ${err.needed} ثانية).` });
+          return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ لصوت المذيع (يحتاج حوالي ${pointsText(err.needed)}).` });
         }
         throw err;
       }
@@ -1012,7 +1015,15 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
     }
     text = recitation.captions.map(c => c.text).join(' ');
     if (!title) title = recitation.title;
-    // No AI voice, so nothing is charged
+    // No AI voice: only the reel price
+    try {
+      chargePoints(req.user!.id, getSettings().costCalmReel, `ريل آيات · ${recitation.title}`);
+    } catch (err) {
+      if (err instanceof InsufficientCreditsError) {
+        return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
+      }
+      throw err;
+    }
     const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
     videoJobs.set(job.id, job);
     startCalmRender(job, {
@@ -1021,13 +1032,15 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
     return res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
   }
 
-  // The calm voice is generated now (charged like any generation) so a balance problem is reported immediately
+  // The calm voice is generated now so a balance problem is reported immediately; the reel costs its fixed price
+  // (or the voice price if a long text costs more)
+  const calmReel = { minPoints: getSettings().costCalmReel, note: 'ريل سكينة' };
   let held = 0;
   try {
-    held = reserveCredits(req.user!.id, estimateSeconds(text, 0.9));
+    held = reserveCredits(req.user!.id, estimateCredits(text, 0.9, calmReel.minPoints));
   } catch (err) {
     if (err instanceof InsufficientCreditsError) {
-      return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ (يحتاج الصوت حوالي ${err.needed} ثانية).` });
+      return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل حوالي ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
     }
     throw err;
   }
@@ -1047,7 +1060,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
       userId: req.user!.id, feature: 'tts', model: TTS_MODEL, voice, chars: text.length,
       promptTokens: tokens.promptTokens, outputTokens: tokens.outputTokens || Math.round(audioSeconds * AUDIO_TOKENS_PER_SECOND),
       audioSeconds, apiKeyId: r.keyId,
-    }, held));
+    }, held, calmReel));
     held = 0;
   } catch (err) {
     if (held > 0) releaseCredits(req.user!.id, held);

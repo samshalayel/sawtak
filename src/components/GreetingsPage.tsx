@@ -6,7 +6,7 @@ import { VOICES } from '../data/presets';
 import {
   OCCASIONS, GENDER_LABELS, GREETING_VOICE_IDS, Gender, Occasion, fillName, occasionTitle, templateText,
 } from '../data/greetings';
-import { AuthUser } from '../types/auth';
+import { AuthUser, ServicePrices } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
 import { AudioTagBar } from './AudioTagBar';
 
@@ -15,6 +15,7 @@ import { AudioTagBar } from './AudioTagBar';
 
 interface GreetingsPageProps {
   user: AuthUser | null;
+  prices: ServicePrices;
   onLoginRequired: (reason: string) => void;
   onBalance: (balance: number) => void;
   onOpenPackages: () => void;
@@ -89,7 +90,7 @@ function parseMembers(raw: string, fallback: Gender): Member[] {
     .filter(m => m.name);
 }
 
-export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, onLoginRequired, onBalance, onOpenPackages }) => {
+export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLoginRequired, onBalance, onOpenPackages }) => {
   const [restored] = useState(loadDraft);
   const messageBox = useRef<HTMLTextAreaElement | null>(null);
   const bulkBoxes = useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -284,13 +285,13 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, onLoginRequi
     setStage('voice');
     setProgress(0);
     try {
-      // 1. The voice (charged by its real length, like any generation)
+      // 1. The voice: charged as a greeting card (the card price covers the voice and the video)
       const ttsRes = await fetch('/api/tts/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text.trim(), voice: voiceId, language: 'ar', dialect: tpl.dialect, toneStyle: tpl.tone,
-          customStylePrompt: occasion.style, speed: 1, pitch: 0,
+          customStylePrompt: occasion.style, speed: 1, pitch: 0, purpose: 'greeting',
         }),
       });
       const tts = await ttsRes.json().catch(() => ({}));
@@ -737,8 +738,8 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, onLoginRequi
       </button>
       <p className="text-[11px] text-slate-500 text-center">
         {mode === 'bulk'
-          ? `يُخصم من رصيدك مدة الأصوات فقط (حوالي ${Math.round(bulkEstimate / 60)} دقيقة لكل القائمة). الفيديوهات مجانية وتُجهَّز على الخادم حتى لو أغلقت الصفحة.`
-          : `يُخصم من رصيدك مدة الصوت فقط (حوالي ${estimate.seconds} ثانية). تجهيز الفيديو مجاني.`}
+          ? `سعر البطاقة ${prices.greeting} نقطة شاملة الصوت والفيديو${members.length ? `، أي حوالي ${(members.length * prices.greeting).toLocaleString('en-US')} نقطة لكل القائمة` : ''}. تُجهَّز على الخادم حتى لو أغلقت الصفحة.`
+          : `سعر البطاقة ${prices.greeting} نقطة شاملة الصوت والفيديو.`}
       </p>
     </div>
   );

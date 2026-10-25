@@ -189,6 +189,7 @@ export interface AppSettings {
   costGreeting: number;              // default 25 pts
   costMotionLibrary: number;         // default 100 pts
   costMotionFree: number;            // default 500 pts
+  costCalmReel: number;              // default 30 pts per calm reel (AI voice or Quran recitation)
   generationsPerMinute: number;      // per-user rate limit
   // USD per 1M tokens, copied from https://ai.google.dev/pricing — used only for the admin cost report
   ttsInputPricePerM: number;
@@ -213,6 +214,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   costGreeting: 25,
   costMotionLibrary: 100,
   costMotionFree: 500,
+  costCalmReel: 30,
   contactWhatsapp: '',
   moderationMode: 'block',
   // Off until a paid key answers fast enough: on free keys the text model can take up to a minute

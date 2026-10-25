@@ -11,16 +11,17 @@ import {
   packageLabel,
   CreditPackage,
 } from '../data/packages';
-import { AuthUser } from '../types/auth';
+import { AuthUser, ServicePrices } from '../types/auth';
 
 interface PackagesModalProps {
   user: AuthUser | null;
+  prices: ServicePrices;
   onClose: () => void;
   onLoginRequired: () => void;
   onPurchaseSuccess?: () => void;
 }
 
-export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onLoginRequired, onPurchaseSuccess }) => {
+export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, onClose, onLoginRequired, onPurchaseSuccess }) => {
   const offerActive = isOfferActive();
   const daysLeft = offerDaysLeft();
   const basePerPoint = CUSTOMER_PACKAGES[0].priceIls / CUSTOMER_PACKAGES[0].points;
@@ -61,7 +62,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onL
           باقات النقاط
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          كل دقيقة صوت = 10 نقاط · فيديو ريلز = 100–500 نقطة · بطاقة تهنئة = 25 نقطة
+          دقيقة صوت = {prices.voicePerMinute} نقاط · بطاقة تهنئة = {prices.greeting} نقطة · ريل سكينة = {prices.calmReel} نقطة · فيديو موشن = {prices.motionLibrary}–{prices.motionFree} نقطة
         </p>
 
         {offerActive && (
@@ -119,7 +120,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, onClose, onL
 
                 <div className="mt-3 text-[11px] text-slate-400 space-y-0.5">
                   <div>المجموع: <b className="text-slate-200">{total.toLocaleString('en-US')} نقطة</b></div>
-                  <div>≈ {Math.round(total / 10)} دقيقة صوت</div>
+                  <div>≈ {Math.round(total / Math.max(1, prices.voicePerMinute))} دقيقة صوت</div>
                   <div>
                     ₪{(pkg.priceIls / total * 100).toFixed(1)} لكل 100 نقطة
                     {savingPct > 0 && <span className="text-emerald-300 font-semibold"> · وفّر {savingPct}%</span>}

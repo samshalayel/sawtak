@@ -7,8 +7,11 @@ import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import zlib from 'zlib';
-import { db } from './db.ts';
-import { estimateSeconds, reserveCredits, releaseCredits, settleTtsCharge, logUsage, pcmSeconds, InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND } from './credits.ts';
+import { db, getSettings } from './db.ts';
+import { estimateCredits, pointsText, reserveCredits, releaseCredits, settleTtsCharge, logUsage, pcmSeconds, InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND } from './credits.ts';
+
+/** Each card costs the card price (or its voice price if a long text costs more). */
+const cardPrice = () => ({ minPoints: getSettings().costGreeting, note: 'بطاقة تهنئة' });
 import { NoKeysAvailableError } from './keys.ts';
 import { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError } from './video.ts';
 import { isGreetingTheme } from './greeting-themes.ts';
@@ -116,8 +119,9 @@ async function runBatch(batch: Batch, deps: BatchDeps) {
 
     // 1. Hold credit for this greeting; an empty balance stops the batch (what's done stays downloadable)
     let held = 0;
+    const price = cardPrice();
     try {
-      held = reserveCredits(batch.userId, estimateSeconds(text));
+      held = reserveCredits(batch.userId, estimateCredits(text, 1, price.minPoints));
     } catch (err) {
       if (!(err instanceof InsufficientCreditsError)) throw err;
       item.status = 'pending';
@@ -149,7 +153,7 @@ async function runBatch(batch: Batch, deps: BatchDeps) {
         userId: batch.userId, feature: 'tts', model: deps.ttsModel, voice: batch.voice, chars: text.length,
         promptTokens: tokens.promptTokens, outputTokens: tokens.outputTokens || Math.round(audioSeconds * AUDIO_TOKENS_PER_SECOND),
         audioSeconds, apiKeyId: synth.keyId,
-      }, held);
+      }, held, price);
       held = 0;
       batch.creditsUsed += charged;
 
@@ -314,13 +318,14 @@ export function createGreetingBatchRouter(deps: BatchDeps) {
       return res.status(409).json({ success: false, error: 'لديك دفعة تهاني قيد التجهيز. انتظر انتهاءها أو أوقفها أولاً.' });
     }
 
-    // The whole list must be affordable up front (each greeting is still charged by its real length)
-    const estimate = members.reduce((sum, m) => sum + estimateSeconds(fill(texts[m.gender]!, m.name)), 0);
+    // The whole list must be affordable up front (each card is charged when it is made)
+    const { minPoints } = cardPrice();
+    const estimate = members.reduce((sum, m) => sum + estimateCredits(fill(texts[m.gender]!, m.name), 1, minPoints), 0);
     const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(req.user!.id) as { credits: number };
     if (credits < estimate) {
       return res.status(402).json({
         success: false, code: 'INSUFFICIENT_CREDITS',
-        error: `تحتاج هذه الدفعة حوالي ${estimate} ثانية من الرصيد، ورصيدك ${credits} ثانية.`,
+        error: `تحتاج هذه الدفعة حوالي ${pointsText(estimate)}، ورصيدك ${pointsText(credits)}.`,
       });
     }
 

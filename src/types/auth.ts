@@ -9,14 +9,25 @@ export interface AuthUser {
   permissions?: string[]; // features granted without admin rights, e.g. ['motion']
 }
 
+/** Service prices in points, set by the admin (the server charges exactly these). */
+export interface ServicePrices {
+  voicePerMinute: number;
+  greeting: number;      // per greeting card, voice included
+  calmReel: number;      // per calm reel (AI voice or Quran recitation)
+  motionLibrary: number;
+  motionFree: number;
+}
+export const DEFAULT_PRICES: ServicePrices = { voicePerMinute: 10, greeting: 25, calmReel: 30, motionLibrary: 100, motionFree: 500 };
+
 export interface PublicConfig {
   signupBonusCredits: number;
   maxTextChars: number;
   contactWhatsapp: string;
   googleEnabled: boolean;
+  prices: ServicePrices;
 }
 
-/** 1 credit = 1 second of audio. Shows "45 ثانية" or "12:30 دقيقة". */
+/** Credits are stored in seconds (1 point = POINTS_TO_SECONDS); shown to people as points: "12 نقطة". */
 // 1 point = 6 seconds (10 points per minute)
 export const POINTS_TO_SECONDS = 6;
 export const secondsToPoints = (sec: number) => Math.round(sec / POINTS_TO_SECONDS);

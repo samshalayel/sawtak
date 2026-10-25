@@ -22,7 +22,7 @@ import { DialogueEditor } from './components/DialogueEditor';
 import { DIALOGUE_TEMPLATES, DialogueTemplate, parseDialogueScript, renderTemplate } from './data/dialogues';
 import { VOICES, LANGUAGES, TONE_STYLES } from './data/presets';
 import { HistoryItem, SampleScript } from './types/tts';
-import { AuthUser, PublicConfig, formatCredits } from './types/auth';
+import { AuthUser, DEFAULT_PRICES, PublicConfig, formatCredits } from './types/auth';
 import { base64ToBlobUrl, estimateDuration } from './utils/audio';
 import { showGenerationSuccess, showStudioAlert } from './utils/alerts';
 import { saveDraft, loadDraft, clearDraft } from './utils/draft';
@@ -77,7 +77,7 @@ export default function App() {
   // Auth
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
-  const [config, setConfig] = useState<PublicConfig>({ signupBonusCredits: 0, maxTextChars: 3000, contactWhatsapp: '', googleEnabled: false });
+  const [config, setConfig] = useState<PublicConfig>({ signupBonusCredits: 0, maxTextChars: 3000, contactWhatsapp: '', googleEnabled: false, prices: DEFAULT_PRICES });
   const [showPackages, setShowPackages] = useState(false);
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
@@ -709,6 +709,7 @@ export default function App() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <CalmPage
           user={user}
+          prices={config.prices ?? DEFAULT_PRICES}
           onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
           onBalance={balance => setUser(prev => (prev ? { ...prev, credits: balance } : prev))}
           onOpenPackages={() => setShowPackages(true)}
@@ -718,6 +719,7 @@ export default function App() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <GreetingsPage
           user={user}
+          prices={config.prices ?? DEFAULT_PRICES}
           onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
           onBalance={balance => setUser(prev => (prev ? { ...prev, credits: balance } : prev))}
           onOpenPackages={() => setShowPackages(true)}
@@ -1035,6 +1037,7 @@ export default function App() {
       {showPackages && (
         <PackagesModal
           user={user}
+          prices={config.prices ?? DEFAULT_PRICES}
           onClose={() => setShowPackages(false)}
           onLoginRequired={() => {
             setShowPackages(false);

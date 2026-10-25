@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { promisify } from 'util';
 import {
-  db, getSettings, getUserById, getUserByNormalizedEmail, grantSignupBonusOnce, hasPermission, Permission, publicUser, UserRow
+  db, getSettings, getUserById, getUserByNormalizedEmail, grantSignupBonusOnce, hasPermission, Permission, POINTS_TO_SECONDS, publicUser, UserRow
 } from './db.ts';
 import { checkEmailDeliverable, normalizeEmail } from './email-checks.ts';
 import { sendVerificationEmail } from './mailer.ts';
@@ -176,7 +176,7 @@ async function sendVerificationLink(req: express.Request, user: UserRow): Promis
   const link = `${baseUrl(req)}/api/auth/verify-email?token=${token}`;
   const { signupBonusCredits } = getSettings();
   const bonusText = !user.bonus_granted && signupBonusCredits > 0
-    ? (signupBonusCredits >= 60 ? `${Math.floor(signupBonusCredits / 60)} دقيقة` : `${signupBonusCredits} ثانية`)
+    ? `${Math.round((signupBonusCredits / POINTS_TO_SECONDS) * 10) / 10} نقطة`
     : '';
   try {
     await sendVerificationEmail(user.email, user.name, link, bonusText);
@@ -286,11 +286,16 @@ authRouter.post('/logout', (req, res) => {
 });
 
 authRouter.get('/me', (req, res) => {
-  const { signupBonusCredits, maxTextChars, contactWhatsapp } = getSettings();
+  const s = getSettings();
+  const { signupBonusCredits, maxTextChars, contactWhatsapp } = s;
   res.json({
     success: true,
     user: req.user ? publicUser(req.user) : null,
-    config: { signupBonusCredits, maxTextChars, contactWhatsapp, googleEnabled: isGoogleEnabled() },
+    config: {
+      signupBonusCredits, maxTextChars, contactWhatsapp, googleEnabled: isGoogleEnabled(),
+      // Service prices in points, so every page shows what will actually be charged
+      prices: { voicePerMinute: s.costTtsPerMinute, greeting: s.costGreeting, calmReel: s.costCalmReel, motionLibrary: s.costMotionLibrary, motionFree: s.costMotionFree },
+    },
   });
 });
 

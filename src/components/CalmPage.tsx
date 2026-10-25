@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AudioTagBar } from './AudioTagBar';
 import { Book, Download, Leaf, Loader2, Pause, Play, Share2, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
-import { AuthUser } from '../types/auth';
+import { AuthUser, ServicePrices } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
 import { stripAudioTags } from '../utils/audioTags';
 import { CALM_FONTS, CalmFont, calmFont } from '../data/calmFonts';
@@ -134,12 +134,13 @@ const isDark = (hex: string) => {
 
 interface Props {
   user: AuthUser | null;
+  prices: ServicePrices;
   onLoginRequired: (reason: string) => void;
   onBalance: (b: number) => void;
   onOpenPackages: () => void;
 }
 
-export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, onOpenPackages }) => {
+export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBalance, onOpenPackages }) => {
   const [templateId, setTemplateId] = useState(TEMPLATES[0].id);
   const textBox = useRef<HTMLTextAreaElement | null>(null);
   const [text, setText] = useState(TEMPLATES[0].text);
@@ -564,7 +565,7 @@ export const CalmPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, on
       <button type="button" onClick={create} disabled={busy} className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-base disabled:opacity-60">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />} اصنع الريل
       </button>
-      <p className="text-[11px] text-slate-500 text-center">{quran ? 'ريل الآيات لا يُخصم من رصيدك: التلاوة والفيديو مجانيان.' : 'يُخصم من رصيدك مدة الصوت فقط. تجهيز الفيديو مجاني.'}</p>
+      <p className="text-[11px] text-slate-500 text-center">{quran ? `سعر الريل ${prices.calmReel} نقطة، بتلاوة القارئ الأصلية.` : `سعر الريل ${prices.calmReel} نقطة شامل الصوت والفيديو.`}</p>
 
       {quranOpen && (
         <QuranPicker

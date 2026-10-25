@@ -112,6 +112,7 @@ interface AppSettings {
   costGreeting: number;
   costMotionLibrary: number;
   costMotionFree: number;
+  costCalmReel: number;
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -832,8 +833,9 @@ const UsageTab: React.FC = () => {
 // ---------- Settings ----------
 
 const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string; hint: string }[] = [
-  { key: 'costTtsPerMinute',   label: 'نص → صوت', icon: '🎙️', hint: 'نقطة لكل دقيقة صوت' },
-  { key: 'costGreeting',       label: 'بطاقة تهنئة', icon: '🎴', hint: 'نقطة للبطاقة الواحدة' },
+  { key: 'costTtsPerMinute',   label: 'نص → صوت', icon: '🎙️', hint: 'نقطة لكل دقيقة صوت (الاستوديو، الحوار، تقديم المذيع)' },
+  { key: 'costGreeting',       label: 'بطاقة تهنئة', icon: '🎴', hint: 'نقطة للبطاقة شاملة الصوت والفيديو (أو سعر الصوت إن كان أطول)' },
+  { key: 'costCalmReel',       label: 'ريل سكينة', icon: '🍃', hint: 'نقطة للريل شامل الصوت أو تلاوة القارئ (أو سعر الصوت إن كان أطول)' },
   { key: 'costMotionLibrary',  label: 'ريلز — نسق جاهز', icon: '🎬', hint: 'نقطة للفيديو الواحد' },
   { key: 'costMotionFree',     label: 'ريلز — نسق حر', icon: '✨', hint: 'نقطة للفيديو الواحد' },
 ];
@@ -901,7 +903,7 @@ const SettingsTab: React.FC = () => {
       <div className="border border-slate-700 rounded-xl overflow-hidden">
         <div className="bg-slate-800/60 px-4 py-2.5 flex items-center gap-2">
           <span className="text-sm font-bold text-white">💎 تسعير الخدمات بالنقاط</span>
-          <span className="text-[11px] text-slate-400">(10 نقاط = دقيقة صوت = ₪0.2)</span>
+          <span className="text-[11px] text-slate-400">(النقطة = ₪0.02 في باقة ₪10)</span>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50">
