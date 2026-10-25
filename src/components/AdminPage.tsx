@@ -3,7 +3,7 @@ import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
   ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical, Smartphone
 } from 'lucide-react';
-import { AuthUser, formatCredits } from '../types/auth';
+import { AuthUser, formatCredits, POINTS_TO_SECONDS } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
 import { KeysTab } from './KeysTab';
 import { ModerationTab } from './ModerationTab';
@@ -77,7 +77,7 @@ interface Transaction {
   id: number;
   delta: number;
   balance_after: number;
-  type: 'signup_bonus' | 'admin_grant' | 'charge';
+  type: 'signup_bonus' | 'admin_grant' | 'charge' | 'purchase';
   note: string;
   created_at: string;
   admin_email: string | null;
@@ -117,7 +117,13 @@ interface AppSettings {
 const FEATURE_LABELS: Record<string, string> = {
   tts: 'توليد صوت', dialogue: 'حوار بصوتين', tashkeel: 'تشكيل', optimize: 'تحسين نص', script: 'كتابة حوار',
 };
-const TX_LABELS: Record<Transaction['type'], string> = { signup_bonus: 'رصيد ترحيبي', admin_grant: 'إدارة', charge: 'استهلاك' };
+const TX_LABELS: Record<Transaction['type'], string> = { signup_bonus: 'رصيد ترحيبي', admin_grant: 'إدارة', charge: 'استهلاك', purchase: 'شراء' };
+
+/** A ledger change in points (credits are stored in seconds; 1 point = 6 s), one decimal when it is not whole. */
+const pointsDelta = (seconds: number) => {
+  const pts = Math.round((seconds / POINTS_TO_SECONDS) * 10) / 10;
+  return `${pts > 0 ? '+' : ''}${pts.toLocaleString('en-US')}`;
+};
 
 export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsChange: (credits: number) => void }> = ({
   currentUser,
@@ -749,9 +755,9 @@ const UserManager: React.FC<{
                   <td className="px-2 py-1.5 whitespace-nowrap">{date(t.created_at)}</td>
                   <td className="px-2 py-1.5">{TX_LABELS[t.type]}</td>
                   <td className={`px-2 py-1.5 font-mono ${t.delta > 0 ? 'text-emerald-300' : 'text-rose-300'}`} dir="ltr">
-                    {t.delta > 0 ? `+${t.delta}` : t.delta}
+                    {pointsDelta(t.delta)}
                   </td>
-                  <td className="px-2 py-1.5 text-slate-500">= {t.balance_after}</td>
+                  <td className="px-2 py-1.5 text-slate-500">= {formatCredits(t.balance_after)}</td>
                   <td className="px-2 py-1.5 text-slate-400 truncate max-w-[180px]" title={t.note}>
                     {t.note}{t.admin_email ? ` · ${t.admin_email}` : ''}
                   </td>
