@@ -806,9 +806,9 @@ export default function App() {
         />
       </main>
       ) : (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Entries to the other services (white cards, each framed in its own colour) */}
-        <div className="grid gap-3">
+        <div className="grid lg:grid-cols-2 gap-3">
           {serviceOn('greetings') && <HomeEntry href="#/greetings" icon={PartyPopper} color="#c026d3" cta="جرّبها"
             title="جديد: تهنئة بالصوت والفيديو" text="عيد ميلاد، أعياد، زواج، تخرّج… فيديو تهنئة جاهز للواتساب خلال دقيقة" />}
           {serviceOn('press') && <HomeEntry href="#/press" icon={Newspaper} color="#0e7490" cta="ابدأ"
