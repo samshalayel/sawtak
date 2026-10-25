@@ -55,9 +55,14 @@ async function getToken(): Promise<string> {
   return token;
 }
 
-function secureHash(params: Record<string, string>): string {
-  const sorted = Object.values(params).map(String).sort().join('');
-  return crypto.createHmac('sha512', HMAC_KEY).update(sorted).digest('hex');
+/**
+ * Jawwal Pay's signature: the request's values plus the login access token, sorted as strings, joined with
+ * nothing, then HMAC-SHA512 with the account's secret, lower-case hex (as in Jawwal's working scripts on the
+ * server, /var/www/mg/check.py: "API values & auth key (login output)").
+ */
+function secureHash(params: Record<string, string>, accessToken: string): string {
+  const joined = [...Object.values(params).map(String), accessToken].sort().join('');
+  return crypto.createHmac('sha512', HMAC_KEY).update(joined).digest('hex').toLowerCase();
 }
 
 function msgId(): string {
@@ -65,13 +70,14 @@ function msgId(): string {
 }
 
 async function post(path: string, payload: Record<string, string>, timeoutMs = 20_000): Promise<any> {
-  payload.secureHash = secureHash(payload);
   for (let attempt = 1; ; attempt++) {
     const token = await getToken();
+    // The token is part of the signature, so it is signed again after a fresh login
+    const body = { ...payload, secureHash: secureHash(payload, token) };
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
     // An expired token is refused before anything happens: log in again once
