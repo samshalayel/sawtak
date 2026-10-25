@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
-  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical
+  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical, Smartphone
 } from 'lucide-react';
 import { AuthUser, formatCredits } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
@@ -11,10 +11,10 @@ import { CustomVoicesTab } from './CustomVoicesTab';
 import { MotionTab } from './MotionTab';
 import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
-import { JawwalPaymentsCard } from './JawwalPaymentsCard';
+import { JawwalTab } from './JawwalTab';
 import { CUSTOMER_PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
 
-type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark';
+type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
 
 interface UsageSummary {
   feature: 'tts' | 'dialogue' | 'tashkeel' | 'optimize' | 'script';
@@ -135,6 +135,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
     { id: 'moderation', label: 'الرقابة على المحتوى', icon: ShieldAlert },
     { id: 'settings', label: 'الإعدادات والتسعير', icon: Settings },
     { id: 'benchmark', label: 'اختبار الأداء', icon: FlaskConical },
+    { id: 'jawwal', label: 'جوال باي', icon: Smartphone },
   ];
 
   return (
@@ -168,6 +169,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
       {tab === 'motion' && <MotionTab admin />}
       {tab === 'moderation' && <ModerationTab />}
       {tab === 'benchmark' && <BenchmarkTab />}
+      {tab === 'jawwal' && <JawwalTab />}
       {tab === 'settings' && (
         <div className="space-y-4">
           <SettingsTab />
@@ -253,7 +255,6 @@ const Overview: React.FC = () => {
         ))}
       </div>
 
-      <JawwalPaymentsCard />
 
       {tokensPerSecond !== null && (
         <p className="text-xs text-slate-400">

@@ -165,7 +165,9 @@ jawwalRouter.post('/pay', async (req: Request, res: Response) => {
     });
   }
 
-  const txId = data?.transactionId != null ? String(data.transactionId) : null;
+  // Jawwal returns its transaction reference as the top-level `ref` (the `reference` in search_trans)
+  const ref = data?.transactionId ?? data?.ref;
+  const txId = ref != null && ref !== '' ? String(ref) : null;
   try {
     const balance = creditPurchase(paymentId, user.id, credits, txId, `جوال باي · ${p.id} · ₪${p.priceIls} · ${txId ?? id}`);
     res.json({ success: true, txId, balance });
@@ -180,4 +182,91 @@ jawwalRouter.post('/pay', async (req: Request, res: Response) => {
 // Admins: every payment attempt, newest first, and whether the gateway is in test or live mode
 jawwalRouter.get('/payments', requireAdmin, (_req: Request, res: Response) => {
   res.json({ success: true, mode: MODE, enabled: enabled(), payments: listJawwalPayments(100) });
+});
+
+// ── admin: merchant wallet and the gateway's own transaction list ─────────────
+
+const last4 = (v: unknown) => {
+  const s = String(v ?? '');
+  return s.length > 4 ? `…${s.slice(-4)}` : s;
+};
+
+// Admins: the merchant wallet balance (bank details and IBAN are not sent to the browser)
+jawwalRouter.get('/balance', requireAdmin, async (_req: Request, res: Response) => {
+  if (!enabled()) return res.status(503).json({ success: false, error: 'بوابة الدفع غير مفعّلة حالياً' });
+  try {
+    const data = await post('/v1/get_balance', { msgId: msgId(), lang: 'AR' });
+    const info = JSON.parse(data.extraData?.find((x: any) => x.key === 'info')?.value ?? '{}');
+    res.json({
+      success: true,
+      mode: MODE,
+      name: info.fullName ?? '',
+      accounts: (info.accounts ?? []).map((a: any) => ({
+        account: last4(a.accountNumber), type: a.accountType, category: a.accountCategory, balance: Number(a.balance) || 0,
+      })),
+    });
+  } catch (e: any) {
+    console.error(`[jawwal] get_balance failed (${MODE}):`, e?.message);
+    res.status(failureStatus(e)).json({ success: false, error: customerError(e) });
+  }
+});
+
+/** "dd/MM/yyyy HH:mm:ss" in Palestine time (the gateway's clock) -> epoch ms. */
+function gatewayTime(s: string): number {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s).trim());
+  if (!m) return NaN;
+  const asUtc = Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] ?? 0));
+  // Offset of Palestine at that moment (summer and winter time differ)
+  const local = new Date(asUtc).toLocaleString('sv-SE', { timeZone: 'Asia/Gaza' }).replace(' ', 'T') + 'Z';
+  return asUtc - (Date.parse(local) - asUtc);
+}
+
+const MAX_DAYS = 31;
+
+// Admins: the gateway's transactions for a date range. search_trans only accepts one day (00:00 to 23:59 of the
+// same date), so the range is fetched day by day. Each one is matched to our own payment log.
+jawwalRouter.get('/transactions', requireAdmin, async (req: Request, res: Response) => {
+  if (!enabled()) return res.status(503).json({ success: false, error: 'بوابة الدفع غير مفعّلة حالياً' });
+  const from = new Date(`${String(req.query.from)}T00:00:00Z`);
+  const to = new Date(`${String(req.query.to)}T00:00:00Z`);
+  if (isNaN(+from) || isNaN(+to) || to < from) return res.status(400).json({ success: false, error: 'تواريخ غير صحيحة' });
+  const days = Math.round((+to - +from) / 86_400_000) + 1;
+  if (days > MAX_DAYS) return res.status(400).json({ success: false, error: `الحد الأقصى ${MAX_DAYS} يوماً في المرة` });
+
+  const dd = (n: number) => String(n).padStart(2, '0');
+  const ours = listJawwalPayments(1000);
+  const txs: any[] = [];
+  const failedDays: string[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(+from + i * 86_400_000);
+    const day = `${dd(d.getUTCDate())}/${dd(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+    try {
+      const data = await post('/v1/business/search_trans', { msgId: msgId(), dateFrom: `${day} 00:00`, dateTo: `${day} 23:59`, lang: 'AR' });
+      const list = JSON.parse(data.extraData?.find((x: any) => x.key === 'txs')?.value || '[]');
+      for (const t of list) {
+        const at = gatewayTime(t.transDate);
+        const amount = Number(t.totalAmount) || 0;
+        // Our payment: same Jawwal reference, or (older rows without one) same amount within 5 minutes
+        const match = ours.find(p => p.tx_id && p.tx_id === String(t.reference))
+          ?? ours.find(p => !p.tx_id && p.status === 'credited' && Math.abs(p.amount_ils - amount) < 0.001
+            && Math.abs(Date.parse(p.created_at.replace(' ', 'T') + 'Z') - at) < 5 * 60_000);
+        txs.push({
+          reference: String(t.reference), date: t.transDate, at, amount, fee: Number(t.chargePlusTax) || 0,
+          flag: t.debitCreditFlag, status: t.processingStatus, reversed: !!t.isReversed, currency: t.currency,
+          operation: t.localOperationName || t.latinOperationName || t.serviceName || '',
+          counterparty: last4(t.debitCreditFlag === 'CREDIT' ? t.senderInfo : t.receiverInfo),
+          payment: match ? { id: match.id, email: match.email, packageId: match.package_id, status: match.status } : null,
+        });
+      }
+    } catch (e: any) {
+      console.error(`[jawwal] search_trans ${day} failed (${MODE}):`, e?.message);
+      failedDays.push(day);
+    }
+  }
+  txs.sort((a, b) => b.at - a.at);
+  const credits = txs.filter(t => t.flag === 'CREDIT' && !t.reversed);
+  res.json({
+    success: true, mode: MODE, days, failedDays, txs,
+    totals: { count: credits.length, amount: credits.reduce((s, t) => s + t.amount, 0), fees: credits.reduce((s, t) => s + t.fee, 0) },
+  });
 });
