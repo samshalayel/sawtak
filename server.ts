@@ -31,6 +31,7 @@ const { newUploadPath, uploadPath, probeVideo, renderOverlayVideo, isOverlayFont
 const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
+const { serviceGate, serviceBlocked } = await import('./server/services.ts');
 const { moderateFull, BLOCKED_MESSAGE } = await import('./server/moderation.ts');
 const { jawwalRouter } = await import('./server/jawwal.ts');
 
@@ -54,6 +55,8 @@ const LARGE_BODY_PATHS = new Set([
 ]);
 app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? largeJson : smallJson)(req, res, next));
 app.use(loadUser);
+// Stopped services refuse new work (admins excepted); see server/services.ts
+app.use(serviceGate);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/motion-stats', motionStatsRouter);
@@ -323,6 +326,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
 
     // A greeting card's voice costs the card price (or the voice price if a long text costs more)
     const greetingCard = req.body.purpose === 'greeting' ? { minPoints: getSettings().costGreeting, note: 'بطاقة تهنئة' } : undefined;
+    if (serviceBlocked(req, res, greetingCard ? 'greetings' : 'tts')) return;
 
     try {
       held = reserveCredits(user.id, estimateCredits(text, Number(speed) || 1, greetingCard?.minPoints ?? 0));
@@ -632,6 +636,7 @@ app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res
           textStyle: clampTextStyle(req.body.greeting.textStyle),
         }
       : undefined;
+    if (serviceBlocked(req, res, greeting ? 'greetings' : 'tts')) return;
     const format = greeting ? 'vertical' : (req.body?.format ?? 'square');
     // A greeting can use the customer's own 9:16 template as the whole background
     if (greeting && typeof req.body?.templateBase64 === 'string' && req.body.templateBase64) {

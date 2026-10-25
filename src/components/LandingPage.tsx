@@ -9,6 +9,7 @@ interface LandingPageProps {
   signupBonusCredits: number;
   onStart: () => void;        // go to the studio (or sign up)
   onOpenPackages: () => void;
+  greetingsOn?: boolean;
 }
 
 // Candy accents rotated across cards
@@ -39,7 +40,7 @@ const STEPS = [
 // Featured voices for the hero / showcase (the rest are in the studio)
 const SHOWCASE_IDS = ['Kore', 'Puck', 'Fenrir', 'Laomedeia', 'Despina', 'Algieba', 'Autonoe', 'Sulafat'];
 
-export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonusCredits, onStart, onOpenPackages }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonusCredits, onStart, onOpenPackages, greetingsOn = true }) => {
   const [playing, setPlaying] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const showcase = SHOWCASE_IDS.map(id => VOICES.find(v => v.id === id)).filter(Boolean) as typeof VOICES;
@@ -179,7 +180,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
         </div>
       </section>
 
-      {/* ---------- Voice greetings (seasonal) ---------- */}
+      {/* ---------- Voice greetings (seasonal; hidden while the service is stopped) ---------- */}
+      {greetingsOn && (
       <section className="relative overflow-hidden rounded-[2.5rem] p-8 sm:p-12 text-[#fff] shadow-xl" style={{ background: 'linear-gradient(120deg, #7c3aed, #db2777 55%, #f97316)' }}>
         <div className="grid lg:grid-cols-[1.4fr_1fr] gap-8 items-center">
           <div className="space-y-4 text-center lg:text-right">
@@ -204,6 +206,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
           </div>
         </div>
       </section>
+      )}
 
       {/* ---------- Features ---------- */}
       <section className="space-y-8">

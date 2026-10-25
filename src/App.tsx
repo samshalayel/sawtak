@@ -22,7 +22,7 @@ import { DialogueEditor } from './components/DialogueEditor';
 import { DIALOGUE_TEMPLATES, DialogueTemplate, parseDialogueScript, renderTemplate } from './data/dialogues';
 import { VOICES, LANGUAGES, TONE_STYLES } from './data/presets';
 import { HistoryItem, SampleScript } from './types/tts';
-import { AuthUser, DEFAULT_PRICES, PublicConfig, formatCredits } from './types/auth';
+import { AuthUser, DEFAULT_PRICES, PublicConfig, ServiceId, formatCredits } from './types/auth';
 import { base64ToBlobUrl, estimateDuration } from './utils/audio';
 import { showGenerationSuccess, showStudioAlert } from './utils/alerts';
 import { saveDraft, loadDraft, clearDraft } from './utils/draft';
@@ -73,11 +73,23 @@ const STEPS = [
   { id: 4, title: 'ولّد الصوت', hint: 'راجع واستمع وحمّل', icon: Wand2 },
 ] as const;
 
+/** Shown instead of a page whose service an admin has stopped. */
+const ServiceOff: React.FC = () => (
+  <div className="text-center py-14 space-y-2">
+    <div className="text-3xl">⏸️</div>
+    <p className="text-base font-bold text-slate-200">هذه الخدمة متوقفة مؤقتاً</p>
+    <p className="text-sm text-slate-400">نعمل عليها حالياً، يرجى المحاولة لاحقاً.</p>
+    <a href="#/" className="inline-block mt-2 text-sm text-amber-400 hover:underline">العودة للرئيسية</a>
+  </div>
+);
+
 export default function App() {
   // Auth
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
   const [config, setConfig] = useState<PublicConfig>({ signupBonusCredits: 0, maxTextChars: 3000, contactWhatsapp: '', googleEnabled: false, prices: DEFAULT_PRICES });
+  // A stopped service is hidden from customers; admins keep using it to test (the server enforces the same rule)
+  const serviceOn = (id: ServiceId) => user?.role === 'admin' || config.services?.[id] !== false;
   const [showPackages, setShowPackages] = useState(false);
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
@@ -175,6 +187,11 @@ export default function App() {
 
   // Two-speaker dialogue mode (podcast / interview)
   const [mode, setMode] = useState<'single' | 'dialogue'>(restoredDraft?.mode ?? 'single');
+  // A stopped mode switches to the other one when it is still on
+  useEffect(() => {
+    if (mode === 'single' && !serviceOn('tts') && serviceOn('dialogue')) setMode('dialogue');
+    else if (mode === 'dialogue' && !serviceOn('dialogue') && serviceOn('tts')) setMode('single');
+  }, [mode, config.services, user?.role]);
   const [speakers, setSpeakers] = useState<[DialogueSpeaker, DialogueSpeaker]>(restoredDraft?.speakers ?? [
     { name: 'أحمد', voiceId: 'Puck' },
     { name: 'سارة', voiceId: 'Kore' },
@@ -653,6 +670,7 @@ export default function App() {
         onReset={handleResetSession}
         user={user}
         view={isAdminView ? 'admin' : view === 'motion' ? 'motion' : 'studio'}
+        motionOn={serviceOn('motion')}
         onLoginClick={() => setAuthPrompt({ mode: 'login' })}
         onLogout={handleLogout}
         onPackagesClick={() => setShowPackages(true)}
@@ -687,6 +705,10 @@ export default function App() {
           currentUser={user!}
           onCurrentUserCreditsChange={(credits) => setUser(prev => (prev ? { ...prev, credits } : prev))}
         />
+      </main>
+      ) : (['press', 'greetings', 'calm', 'motion'] as const).some(v => view === v && !serviceOn(v)) ? (
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+        <ServiceOff />
       </main>
       ) : view === 'press' ? (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
@@ -734,6 +756,7 @@ export default function App() {
         <LandingPage
           isLoggedIn={Boolean(user)}
           signupBonusCredits={config.signupBonusCredits}
+          greetingsOn={serviceOn('greetings')}
           onStart={() => { window.location.hash = '#/studio'; window.scrollTo({ top: 0 }); }}
           onOpenPackages={() => setShowPackages(true)}
         />
@@ -741,7 +764,7 @@ export default function App() {
       ) : (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Entry to voice greetings (seasonal feature) */}
-        <a
+        {serviceOn('greetings') && <a
           href="#/greetings"
           className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
           style={{ background: 'linear-gradient(110deg, #7c3aed, #db2777)' }}
@@ -752,8 +775,8 @@ export default function App() {
             <div className="text-xs opacity-90">عيد ميلاد، أعياد، زواج، تخرّج… فيديو تهنئة جاهز للواتساب خلال دقيقة</div>
           </div>
           <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">جرّبها</span>
-        </a>
-        <a
+        </a>}
+        {serviceOn('press') && <a
           href="#/press"
           className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
           style={{ background: 'linear-gradient(110deg, #0f172a, #0e7490)' }}
@@ -764,8 +787,8 @@ export default function App() {
             <div className="text-xs opacity-90">حوّل مقالك إلى بودكاست أو نشرة أخبار أو ملخص مسموع، بفيديو بهوية مؤسستك</div>
           </div>
           <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">ابدأ</span>
-        </a>
-        <a
+        </a>}
+        {serviceOn('calm') && <a
           href="#/calm"
           className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
           style={{ background: 'linear-gradient(110deg, #065f46, #0d9488)' }}
@@ -776,14 +799,15 @@ export default function App() {
             <div className="text-xs opacity-90">مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة</div>
           </div>
           <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">جرّبها</span>
-        </a>
+        </a>}
 
+        {!serviceOn('tts') && !serviceOn('dialogue') && <ServiceOff />}
         {/* Mode: single voice vs two-speaker dialogue */}
         <div className="grid grid-cols-2 gap-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-1.5">
           {([
             { id: 'single', label: 'صوت واحد', hint: 'تعليق صوتي، إعلان، شرح', icon: Mic },
             { id: 'dialogue', label: 'حوار بين صوتين', hint: 'بودكاست، مقابلة، إعلان حواري', icon: Users },
-          ] as const).map(m => {
+          ] as const).filter(m => serviceOn(m.id === 'single' ? 'tts' : 'dialogue')).map(m => {
             const Icon = m.icon;
             const active = mode === m.id;
             return (
@@ -1038,6 +1062,7 @@ export default function App() {
         <PackagesModal
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}
+          paymentsOn={serviceOn('payments')}
           onClose={() => setShowPackages(false)}
           onLoginRequired={() => {
             setShowPackages(false);
@@ -1077,7 +1102,7 @@ export default function App() {
       </footer>
 
       {/* Phones only: app-style bottom bar and "install the app" suggestion */}
-      <MobileAppNav view={view} studioHash="#/studio" onPackages={() => setShowPackages(true)} />
+      <MobileAppNav view={view} studioHash="#/studio" onPackages={() => setShowPackages(true)} isOn={id => serviceOn(id)} />
     </div>
   );
 }

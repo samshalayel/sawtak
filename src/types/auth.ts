@@ -19,7 +19,11 @@ export interface ServicePrices {
 }
 export const DEFAULT_PRICES: ServicePrices = { voicePerMinute: 10, greeting: 25, calmReel: 30, motionLibrary: 100, motionFree: 500 };
 
+export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'motion' | 'press' | 'payments';
+
 export interface PublicConfig {
+  /** Service switches from the admin settings (missing = on). Stopped services are hidden from customers. */
+  services?: Partial<Record<ServiceId, boolean>>;
   signupBonusCredits: number;
   maxTextChars: number;
   contactWhatsapp: string;

@@ -24,6 +24,8 @@ interface HeaderProps {
   onLogout: () => void;
   onPackagesClick: () => void;
   view: 'studio' | 'admin' | 'motion';
+  /** False when the motion service is stopped (the link is hidden). */
+  motionOn?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onPackagesClick,
   view,
+  motionOn = true,
 }) => {
   const offerActive = isOfferActive();
   const [showGuide, setShowGuide] = useState(false);
@@ -98,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>{formatCredits(user.credits)}</span>
                 </div>
 
-                {user.role !== 'admin' && user.permissions?.includes('motion') && (
+                {user.role !== 'admin' && motionOn && user.permissions?.includes('motion') && (
                   <a
                     href={view === 'motion' ? '#/' : '#/motion'}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"

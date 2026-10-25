@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import {
   db, getSettings, getUserById, getUserByNormalizedEmail, grantSignupBonusOnce, hasPermission, Permission, POINTS_TO_SECONDS, publicUser, UserRow
 } from './db.ts';
+import { serviceStatus } from './services.ts';
 import { checkEmailDeliverable, normalizeEmail } from './email-checks.ts';
 import { sendVerificationEmail } from './mailer.ts';
 
@@ -295,6 +296,8 @@ authRouter.get('/me', (req, res) => {
       signupBonusCredits, maxTextChars, contactWhatsapp, googleEnabled: isGoogleEnabled(),
       // Service prices in points, so every page shows what will actually be charged
       prices: { voicePerMinute: s.costTtsPerMinute, greeting: s.costGreeting, calmReel: s.costCalmReel, motionLibrary: s.costMotionLibrary, motionFree: s.costMotionFree },
+      // Which services are on (stopped ones are hidden; admins still see and use them)
+      services: serviceStatus(),
     },
   });
 });

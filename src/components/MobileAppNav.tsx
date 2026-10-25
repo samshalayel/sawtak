@@ -7,6 +7,8 @@ import { Download, Gift, Leaf, Mic, Newspaper, PartyPopper, Share, X } from 'luc
 
 interface Props {
   view: string;
+  /** Hides the tabs of stopped services. */
+  isOn?: (id: 'tts' | 'greetings' | 'press' | 'calm') => boolean;
   studioHash: string;       // '#/' on the classic site, '#/studio' on the redesign
   onPackages: () => void;
 }
@@ -18,7 +20,7 @@ const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
 const isIos = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages }) => {
+export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages, isOn = () => true }) => {
   const [deferred, setDeferred] = useState<any>(null);
   const [showInstall, setShowInstall] = useState(false);
   const [iosHelp, setIosHelp] = useState(false);
@@ -68,7 +70,7 @@ export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages }) 
     { id: 'greetings', label: 'التهاني', icon: PartyPopper, href: '#/greetings', active: view === 'greetings' },
     { id: 'press', label: 'الصحفيين', icon: Newspaper, href: '#/press', active: view === 'press' },
     { id: 'calm', label: 'السكينة', icon: Leaf, href: '#/calm', active: view === 'calm' },
-  ];
+  ].filter(t => t.id === 'studio' || isOn(t.id as 'greetings' | 'press' | 'calm'));
 
   return (
     <div className="sm:hidden">

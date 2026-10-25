@@ -113,6 +113,13 @@ interface AppSettings {
   costMotionLibrary: number;
   costMotionFree: number;
   costCalmReel: number;
+  serviceTts: number;
+  serviceDialogue: number;
+  serviceGreetings: number;
+  serviceCalm: number;
+  serviceMotion: number;
+  servicePress: number;
+  servicePayments: number;
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -840,6 +847,17 @@ const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string
   { key: 'costMotionFree',     label: 'ريلز — نسق حر', icon: '✨', hint: 'نقطة للفيديو الواحد' },
 ];
 
+/** On/off switch per service (1 = on). Stopped services are hidden from customers and refused by the server; admins can still use them. */
+const SERVICE_SWITCHES: { key: keyof AppSettings; label: string; icon: string }[] = [
+  { key: 'serviceTts', label: 'استوديو الصوت (صوت واحد)', icon: '🎙️' },
+  { key: 'serviceDialogue', label: 'الحوار بين صوتين', icon: '🗣️' },
+  { key: 'serviceGreetings', label: 'التهاني بالصوت والفيديو', icon: '🎴' },
+  { key: 'serviceCalm', label: 'ريلز السكينة والآيات', icon: '🍃' },
+  { key: 'serviceMotion', label: 'الموشن جرافيك', icon: '🎬' },
+  { key: 'servicePress', label: 'استوديو الصحفيين', icon: '📰' },
+  { key: 'servicePayments', label: 'الدفع بجوال باي', icon: '💳' },
+];
+
 const SETTING_FIELDS: { key: Exclude<keyof AppSettings, 'contactWhatsapp'>; label: string; hint: string; step?: string; points?: boolean }[] = [
   // Stored in seconds; entered and shown in points
   { key: 'signupBonusCredits', label: 'الرصيد الترحيبي (نقاط)', hint: 'يُمنح لكل حساب جديد عند التسجيل', points: true },
@@ -867,7 +885,7 @@ const SettingsTab: React.FC = () => {
     setMessage(null);
     try {
       // Only this form's fields: the SMTP card saves its own values separately
-      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key)].map(k => [k, settings[k as keyof AppSettings]]));
+      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key), ...SERVICE_SWITCHES.map(f => f.key)].map(k => [k, settings[k as keyof AppSettings]]));
       const d = await api<{ settings: AppSettings }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(own) });
       setSettings(d.settings);
       setMessage('تم حفظ الإعدادات');
@@ -899,6 +917,33 @@ const SettingsTab: React.FC = () => {
         />
         <span className="block text-[11px] text-slate-500">بالصيغة الدولية بدون + أو أصفار بالبداية. زر "اطلب عبر واتساب" يفتح محادثة مع هذا الرقم.</span>
       </label>
+      {/* Service switches */}
+      <div className="border border-slate-700 rounded-xl overflow-hidden">
+        <div className="bg-slate-800/60 px-4 py-2.5 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-bold text-white">🔌 تشغيل وإيقاف الخدمات</span>
+          <span className="text-[11px] text-slate-400">الخدمة الموقفة تختفي عند الزبائن ويرفضها الخادم، وتبقى متاحة لك كأدمن للتجربة. اضغط حفظ بعد التغيير.</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2">
+          {SERVICE_SWITCHES.map((f, i) => {
+            const on = settings[f.key] !== 0;
+            return (
+              <label key={f.key} className={`flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer ${i % 2 === 0 ? 'bg-slate-950/40' : ''}`}>
+                <span className={`text-sm ${on ? 'text-slate-200' : 'text-slate-500 line-through'}`}>{f.icon} {f.label}</span>
+                <span className="flex items-center gap-2">
+                  <span className={`text-[11px] font-bold ${on ? 'text-emerald-400' : 'text-rose-400'}`}>{on ? 'شغّالة' : 'متوقفة'}</span>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={e => setSettings({ ...settings, [f.key]: e.target.checked ? 1 : 0 })}
+                    className="w-5 h-5 accent-emerald-500"
+                  />
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Service pricing table */}
       <div className="border border-slate-700 rounded-xl overflow-hidden">
         <div className="bg-slate-800/60 px-4 py-2.5 flex items-center gap-2">

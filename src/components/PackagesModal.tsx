@@ -16,12 +16,14 @@ import { AuthUser, ServicePrices } from '../types/auth';
 interface PackagesModalProps {
   user: AuthUser | null;
   prices: ServicePrices;
+  /** False while an admin has stopped online payment. */
+  paymentsOn?: boolean;
   onClose: () => void;
   onLoginRequired: () => void;
   onPurchaseSuccess?: () => void;
 }
 
-export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, onClose, onLoginRequired, onPurchaseSuccess }) => {
+export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, paymentsOn = true, onClose, onLoginRequired, onPurchaseSuccess }) => {
   const offerActive = isOfferActive();
   const daysLeft = offerDaysLeft();
   const basePerPoint = CUSTOMER_PACKAGES[0].priceIls / CUSTOMER_PACKAGES[0].points;
@@ -36,7 +38,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, onCl
       onLoginRequired();
       return;
     }
-    if (needsVerification) return;
+    if (needsVerification || !paymentsOn) return;
     setPayingPkg(pkg);
   };
 
@@ -65,6 +67,11 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, onCl
           دقيقة صوت = {prices.voicePerMinute} نقاط · بطاقة تهنئة = {prices.greeting} نقطة · ريل سكينة = {prices.calmReel} نقطة · فيديو موشن = {prices.motionLibrary}–{prices.motionFree} نقطة
         </p>
 
+        {!paymentsOn && (
+          <div className="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5 text-sm text-amber-200">
+            الدفع الإلكتروني متوقف مؤقتاً، يرجى المحاولة لاحقاً.
+          </div>
+        )}
         {offerActive && (
           <div className="mt-4 flex items-center justify-between flex-wrap gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-2.5">
             <span className="flex items-center gap-2 text-emerald-300 text-sm font-semibold">
@@ -132,7 +139,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, onCl
                   <button
                     type="button"
                     onClick={() => handleOrder(pkg)}
-                    disabled={needsVerification}
+                    disabled={needsVerification || !paymentsOn}
                     className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       pkg.popular
                         ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
