@@ -12,7 +12,7 @@ import { MotionTab } from './MotionTab';
 import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
 import { JawwalTab } from './JawwalTab';
-import { CUSTOMER_PACKAGES, packageBaseMinutes, packageBonusMinutes, packageLabel, packageTotalMinutes } from '../data/packages';
+import { CUSTOMER_PACKAGES, packageBonusPoints, packageLabel, packageTotalSeconds } from '../data/packages';
 
 type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
 
@@ -118,6 +118,12 @@ const FEATURE_LABELS: Record<string, string> = {
   tts: 'توليد صوت', dialogue: 'حوار بصوتين', tashkeel: 'تشكيل', optimize: 'تحسين نص', script: 'كتابة حوار',
 };
 const TX_LABELS: Record<Transaction['type'], string> = { signup_bonus: 'رصيد ترحيبي', admin_grant: 'إدارة', charge: 'استهلاك', purchase: 'شراء' };
+
+/** Seconds of audio as a short hint: "= 300 ثانية (5 دقائق)". */
+const secondsHint = (seconds: number) => {
+  const s = Math.round(seconds);
+  return s >= 120 ? `= ${s.toLocaleString('en-US')} ثانية صوت (${Math.round((s / 60) * 10) / 10} دقيقة)` : `= ${s.toLocaleString('en-US')} ثانية صوت`;
+};
 
 /** A ledger change in points (credits are stored in seconds; 1 point = 6 s), one decimal when it is not whole. */
 const pointsDelta = (seconds: number) => {
@@ -229,8 +235,8 @@ const Overview: React.FC = () => {
   const tiles = [
     { label: 'المستخدمون', value: num(stats.users.total), hint: `${num(stats.users.new_users)} جديد خلال الفترة` },
     { label: 'صوت مولّد', value: formatCredits(Math.round(tts?.audio_seconds ?? 0)), hint: `${num(tts?.requests ?? 0)} طلب · ${num(tts?.failed ?? 0)} فاشل` },
-    { label: 'كريدت مخصوم', value: num(tts?.credits_charged ?? 0), hint: 'ثانية مفوترة للعملاء' },
-    { label: 'رصيد قائم لدى العملاء', value: num(stats.users.outstanding_credits), hint: 'ثانية لم تُستهلك بعد' },
+    { label: 'نقاط مخصومة', value: formatCredits(tts?.credits_charged ?? 0), hint: `مفوترة للعملاء ${secondsHint(tts?.credits_charged ?? 0)}` },
+    { label: 'رصيد قائم لدى العملاء', value: formatCredits(stats.users.outstanding_credits), hint: `لم يُستهلك بعد ${secondsHint(stats.users.outstanding_credits)}` },
     { label: 'توكنات Google (إخراج)', value: num(totals.output), hint: `+ ${num(totals.prompt)} توكن إدخال` },
     { label: 'التكلفة التقديرية', value: usd(totals.cost), hint: 'حسب أسعار صفحة الإعدادات' },
   ];
@@ -556,7 +562,7 @@ const UsersTab: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsChange: (c
   );
 };
 
-const QUICK_AMOUNTS = [60, 300, 600, 1800, 3600];
+const QUICK_POINTS = [10, 50, 100, 300, 600]; // = 1, 5, 10, 30, 60 minutes of audio
 
 const UserManager: React.FC<{
   user: AdminUser;
@@ -598,12 +604,12 @@ const UserManager: React.FC<{
   };
 
   const submit = (sign: 1 | -1) => {
-    const value = Math.trunc(Number(amount));
-    if (!value || value <= 0) {
-      setMessage('أدخل عدد ثوانٍ صحيح');
+    const points = Math.trunc(Number(amount));
+    if (!points || points <= 0) {
+      setMessage('أدخل عدد نقاط صحيح');
       return;
     }
-    grant(sign * value, note);
+    grant(sign * points * POINTS_TO_SECONDS, note);
   };
 
   // The server refuses top-ups for unconfirmed e-mails (the address may be mistyped and the credit unusable)
@@ -620,7 +626,7 @@ const UserManager: React.FC<{
         <div className="text-xs font-bold text-white">شحن باقة (تشمل هدية العرض إن وُجدت)</div>
         <div className="flex flex-wrap gap-1.5">
           {CUSTOMER_PACKAGES.map(pkg => {
-            const bonus = packageBonusMinutes(pkg);
+            const bonus = packageBonusPoints(pkg);
             return (
               <button
                 key={pkg.id}
@@ -628,27 +634,28 @@ const UserManager: React.FC<{
                 disabled={busy || topUpBlocked}
                 onClick={() => {
                   if (window.confirm(`شحن ${packageLabel(pkg)} لـ ${user.email}؟`)) {
-                    grant(packageTotalMinutes(pkg) * 60, packageLabel(pkg));
+                    grant(packageTotalSeconds(pkg), packageLabel(pkg));
                   }
                 }}
+                title={secondsHint(packageTotalSeconds(pkg))}
                 className="px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
               >
-                ₪{pkg.priceIls} · {packageBaseMinutes(pkg)} د{bonus > 0 && <b className="text-emerald-300"> +{bonus} هدية</b>}
+                ₪{pkg.priceIls} · {pkg.points.toLocaleString('en-US')} نقطة{bonus > 0 && <b className="text-emerald-300"> +{bonus.toLocaleString('en-US')} هدية</b>}
               </button>
             );
           })}
         </div>
 
-        <div className="text-xs font-bold text-white pt-2">تعديل يدوي (بالثواني)</div>
+        <div className="text-xs font-bold text-white pt-2">تعديل يدوي (بالنقاط)</div>
         <div className="flex flex-wrap gap-1.5">
-          {QUICK_AMOUNTS.map(a => (
+          {QUICK_POINTS.map(a => (
             <button
               key={a}
               type="button"
               onClick={() => setAmount(String(a))}
               className="px-2 py-1 rounded-lg border border-slate-800 text-[11px] text-slate-300 hover:border-amber-500/50"
             >
-              {formatCredits(a)}
+              {a.toLocaleString('en-US')} نقطة
             </button>
           ))}
         </div>
@@ -658,7 +665,7 @@ const UserManager: React.FC<{
             min={1}
             value={amount}
             onChange={e => setAmount(e.target.value)}
-            placeholder="عدد الثواني"
+            placeholder="عدد النقاط"
             className="w-32 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
           />
           <input
@@ -668,6 +675,7 @@ const UserManager: React.FC<{
             className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
           />
         </div>
+        {Number(amount) > 0 && <div className="text-[11px] text-slate-500">{secondsHint(Math.trunc(Number(amount)) * POINTS_TO_SECONDS)}</div>}
         <div className="flex gap-2">
           <button
             type="button"
@@ -793,7 +801,7 @@ const UsageTab: React.FC = () => {
           <tr className="border-b border-slate-800">
             <th className={th}>الوقت</th><th className={th}>المستخدم</th><th className={th}>الخدمة</th><th className={th}>الصوت</th>
             <th className={th}>أحرف</th><th className={th}>توكن إدخال</th><th className={th}>توكن إخراج</th>
-            <th className={th}>ثواني</th><th className={th}>كريدت</th><th className={th}>التكلفة</th><th className={th}>الحالة</th>
+            <th className={th}>ثواني صوت</th><th className={th}>نقاط</th><th className={th}>التكلفة</th><th className={th}>الحالة</th>
           </tr>
         </thead>
         <tbody>
@@ -807,7 +815,7 @@ const UsageTab: React.FC = () => {
               <td className={td}>{num(r.prompt_tokens)}</td>
               <td className={td}>{num(r.output_tokens)}</td>
               <td className={td}>{r.audio_seconds ? r.audio_seconds.toFixed(1) : '—'}</td>
-              <td className={td}>{r.credits_charged || '—'}</td>
+              <td className={td} title={r.credits_charged ? secondsHint(r.credits_charged) : ''}>{r.credits_charged ? (Math.round((r.credits_charged / POINTS_TO_SECONDS) * 10) / 10).toLocaleString('en-US') : '—'}</td>
               <td className={td}>{usd(r.cost_usd)}</td>
               <td className={td}>{r.status === 'ok' ? <span className="text-emerald-300">ناجح</span> : <span className="text-rose-300">فشل</span>}</td>
             </tr>
@@ -830,8 +838,9 @@ const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string
   { key: 'costMotionFree',     label: 'ريلز — نسق حر', icon: '✨', hint: 'نقطة للفيديو الواحد' },
 ];
 
-const SETTING_FIELDS: { key: Exclude<keyof AppSettings, 'contactWhatsapp'>; label: string; hint: string; step?: string }[] = [
-  { key: 'signupBonusCredits', label: 'الرصيد الترحيبي (ثانية)', hint: 'يُمنح لكل حساب جديد عند التسجيل' },
+const SETTING_FIELDS: { key: Exclude<keyof AppSettings, 'contactWhatsapp'>; label: string; hint: string; step?: string; points?: boolean }[] = [
+  // Stored in seconds; entered and shown in points
+  { key: 'signupBonusCredits', label: 'الرصيد الترحيبي (نقاط)', hint: 'يُمنح لكل حساب جديد عند التسجيل', points: true },
   { key: 'maxTextChars', label: 'الحد الأقصى لطول النص (حرف)', hint: 'لكل طلب توليد' },
   { key: 'generationsPerMinute', label: 'عدد التوليدات بالدقيقة لكل مستخدم', hint: 'حماية من الاستهلاك المفرط' },
   { key: 'ttsInputPricePerM', label: 'سعر توكن الإدخال — TTS ($ / مليون)', hint: 'نموذج gemini-3.8-flash-lite-tts', step: 'any' },
@@ -932,12 +941,12 @@ const SettingsTab: React.FC = () => {
               type="number"
               min={0}
               step={f.step ?? '1'}
-              value={settings[f.key]}
-              onChange={e => setSettings({ ...settings, [f.key]: Number(e.target.value) })}
+              value={f.points ? Math.round(((settings[f.key] as number) / POINTS_TO_SECONDS) * 10) / 10 : settings[f.key]}
+              onChange={e => setSettings({ ...settings, [f.key]: f.points ? Math.round(Number(e.target.value) * POINTS_TO_SECONDS) : Number(e.target.value) })}
               className="mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
               dir="ltr"
             />
-            <span className="text-[11px] text-slate-500">{f.hint}</span>
+            <span className="text-[11px] text-slate-500">{f.hint}{f.points ? ` ${secondsHint(settings[f.key] as number)}` : ''}</span>
           </label>
         ))}
       </div>

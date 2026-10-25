@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, AudioLines, Mic2, Languages, Users, Wand2, Copy, Film, Gift, ArrowLeft, Check, Headphones, PenLine, Download, Cake, Moon, TreePine, Gem, GraduationCap, PartyPopper } from 'lucide-react';
 import { VOICES } from '../data/presets';
-import { CUSTOMER_PACKAGES, isOfferActive, packageBaseMinutes, packageBonusMinutes, packageTotalMinutes } from '../data/packages';
+import { CUSTOMER_PACKAGES, isOfferActive, packageBaseMinutes, packageBonusPoints, packageTotalMinutes, packageTotalPoints } from '../data/packages';
+import { formatCredits } from '../types/auth';
 
 interface LandingPageProps {
   isLoggedIn: boolean;
@@ -95,7 +96,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
             </div>
             {!isLoggedIn && signupBonusCredits > 0 && (
               <p className="flex items-center gap-2 justify-center lg:justify-start text-sm font-semibold text-emerald-600">
-                <Gift className="w-4 h-4" /> دقيقة صوت مجانية عند التسجيل — بدون بطاقة
+                <Gift className="w-4 h-4" /> {formatCredits(signupBonusCredits)} مجاناً عند التسجيل — بدون بطاقة
               </p>
             )}
           </div>
@@ -249,13 +250,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
           <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-800">باقات تناسب الجميع</h2>
           {offer && (
             <p className="inline-flex items-center gap-2 font-semibold text-pink-600">
-              <Gift className="w-5 h-5" /> عرض الإطلاق: دقائق مجانية إضافية حتى نهاية السنة
+              <Gift className="w-5 h-5" /> عرض الإطلاق: نقاط مجانية إضافية حتى نهاية السنة
             </p>
           )}
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {CUSTOMER_PACKAGES.map((p, i) => {
-            const bonus = packageBonusMinutes(p);
+            const bonus = packageBonusPoints(p);
             return (
               <div
                 key={p.id}
@@ -267,14 +268,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
                   </span>
                 )}
                 <div className={`text-4xl font-extrabold ${p.popular ? '' : 'text-gray-800'}`}>₪{p.priceIls}</div>
-                <div className={`mt-1 text-lg font-bold ${p.popular ? 'opacity-95' : 'text-gray-600'}`}>{packageBaseMinutes(p)} دقيقة</div>
+                <div className={`mt-1 text-lg font-bold ${p.popular ? 'opacity-95' : 'text-gray-600'}`}>{p.points.toLocaleString('en-US')} نقطة</div>
+                <div className={`text-xs ${p.popular ? 'opacity-80' : 'text-gray-400'}`}>≈ {packageBaseMinutes(p)} دقيقة صوت</div>
                 {bonus > 0 && (
                   <div className={`mt-2 inline-block px-3 py-1 rounded-full text-sm font-bold ${p.popular ? 'bg-[#ffffff33]' : 'bg-emerald-100 text-emerald-700'}`}>
-                    +{bonus} دقيقة هدية
+                    +{bonus.toLocaleString('en-US')} نقطة هدية
                   </div>
                 )}
                 <ul className={`mt-4 space-y-1.5 text-sm text-right ${p.popular ? 'opacity-95' : 'text-gray-500'}`}>
-                  <li className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> المجموع {packageTotalMinutes(p)} دقيقة</li>
+                  <li className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> المجموع {packageTotalPoints(p).toLocaleString('en-US')} نقطة (≈ {packageTotalMinutes(p)} دقيقة صوت)</li>
                   <li className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> كل الأصوات واللهجات</li>
                   <li className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> حوار بصوتين وفيديو</li>
                 </ul>
@@ -295,7 +297,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ isLoggedIn, signupBonu
         <div className="blob w-60 h-60 bg-cyan-200 -bottom-16 -right-10" />
         <div className="relative space-y-4">
           <h2 className="text-3xl sm:text-5xl font-extrabold text-gray-800">جاهز تسمع صوتك؟</h2>
-          <p className="text-lg text-gray-500">جرّب الآن مجاناً، وأول دقيقة علينا.</p>
+          <p className="text-lg text-gray-500">جرّب الآن مجاناً{signupBonusCredits > 0 ? `، وأول ${formatCredits(signupBonusCredits)} علينا` : ''}.</p>
           <button
             type="button"
             onClick={onStart}
