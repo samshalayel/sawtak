@@ -97,8 +97,10 @@ db.exec(`
     checked_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
-const verdictOf = (key: string) => (db.prepare('SELECT ok FROM medical_bg_checks WHERE key = ?').get(key) as { ok: number } | undefined)?.ok;
-const saveVerdict = (key: string, ok: boolean) => db.prepare('INSERT OR REPLACE INTO medical_bg_checks (key, ok) VALUES (?, ?)').run(key, ok ? 1 : 0);
+// Bump when the check gets stricter, so earlier verdicts are ignored and everything is looked at again
+const CHECK_VERSION = 2;
+const verdictOf = (key: string) => (db.prepare('SELECT ok FROM medical_bg_checks WHERE key = ?').get(`${CHECK_VERSION}|${key}`) as { ok: number } | undefined)?.ok;
+const saveVerdict = (key: string, ok: boolean) => db.prepare('INSERT OR REPLACE INTO medical_bg_checks (key, ok) VALUES (?, ?)').run(`${CHECK_VERSION}|${key}`, ok ? 1 : 0);
 
 /** Whether a background passed the check: `p:<id>` for a photo, `v:<id>` for a clip. */
 export const backgroundApproved = (key: string) => verdictOf(key) === 1;
