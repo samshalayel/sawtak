@@ -85,6 +85,20 @@ const ServiceOff: React.FC = () => (
   </div>
 );
 
+/** A home-page entry to one service: a white card framed in the service's colour. */
+const HomeEntry: React.FC<{ href: string; icon: React.ElementType; color: string; title: string; text: string; cta: string }> = ({ href, icon: Icon, color, title, text, cta }) => (
+  <a href={href} className="group flex items-center gap-3 rounded-2xl px-4 py-3 bg-slate-900 border-2 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition" style={{ borderColor: color }}>
+    <span className="w-11 h-11 shrink-0 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${color}1a`, color }}>
+      <Icon className="w-6 h-6" />
+    </span>
+    <div className="flex-1 min-w-0">
+      <div className="font-extrabold text-sm" style={{ color }}>{title}</div>
+      <div className="text-xs text-slate-400">{text}</div>
+    </div>
+    <span className="text-xs font-bold text-[#ffffff] rounded-lg px-2.5 py-1 whitespace-nowrap group-hover:brightness-110" style={{ backgroundColor: color }}>{cta}</span>
+  </a>
+);
+
 export default function App() {
   // Auth
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -793,55 +807,17 @@ export default function App() {
       </main>
       ) : (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Entry to voice greetings (seasonal feature) */}
-        {serviceOn('greetings') && <a
-          href="#/greetings"
-          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
-          style={{ background: 'linear-gradient(110deg, #7c3aed, #db2777)' }}
-        >
-          <PartyPopper className="w-7 h-7 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="font-extrabold text-sm">جديد: تهنئة بالصوت والفيديو</div>
-            <div className="text-xs opacity-90">عيد ميلاد، أعياد، زواج، تخرّج… فيديو تهنئة جاهز للواتساب خلال دقيقة</div>
-          </div>
-          <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">جرّبها</span>
-        </a>}
-        {serviceOn('press') && <a
-          href="#/press"
-          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
-          style={{ background: 'linear-gradient(110deg, #0f172a, #0e7490)' }}
-        >
-          <Newspaper className="w-7 h-7 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="font-extrabold text-sm">استوديو الصحفيين</div>
-            <div className="text-xs opacity-90">حوّل مقالك إلى بودكاست أو نشرة أخبار أو ملخص مسموع، بفيديو بهوية مؤسستك</div>
-          </div>
-          <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">ابدأ</span>
-        </a>}
-        {serviceOn('calm') && <a
-          href="#/calm"
-          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
-          style={{ background: 'linear-gradient(110deg, #065f46, #0d9488)' }}
-        >
-          <Leaf className="w-7 h-7 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="font-extrabold text-sm">ريلز السكينة</div>
-            <div className="text-xs opacity-90">مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة</div>
-          </div>
-          <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">جرّبها</span>
-        </a>}
-        {serviceOn('medical') && <a
-          href="#/medical"
-          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
-          style={{ background: 'linear-gradient(110deg, #075985, #0ea5e9)' }}
-        >
-          <Stethoscope className="w-7 h-7 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="font-extrabold text-sm">بطاقات وريلز طبية</div>
-            <div className="text-xs opacity-90">اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك</div>
-          </div>
-          <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">ابدأ</span>
-        </a>}
+        {/* Entries to the other services (white cards, each framed in its own colour) */}
+        <div className="grid gap-3">
+          {serviceOn('greetings') && <HomeEntry href="#/greetings" icon={PartyPopper} color="#c026d3" cta="جرّبها"
+            title="جديد: تهنئة بالصوت والفيديو" text="عيد ميلاد، أعياد، زواج، تخرّج… فيديو تهنئة جاهز للواتساب خلال دقيقة" />}
+          {serviceOn('press') && <HomeEntry href="#/press" icon={Newspaper} color="#0e7490" cta="ابدأ"
+            title="استوديو الصحفيين" text="حوّل مقالك إلى بودكاست أو نشرة أخبار أو ملخص مسموع، بفيديو بهوية مؤسستك" />}
+          {serviceOn('calm') && <HomeEntry href="#/calm" icon={Leaf} color="#059669" cta="جرّبها"
+            title="ريلز السكينة" text="مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة" />}
+          {serviceOn('medical') && <HomeEntry href="#/medical" icon={Stethoscope} color="#0284c7" cta="ابدأ"
+            title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
+        </div>
 
         {!serviceOn('tts') && !serviceOn('dialogue') && <ServiceOff />}
         {/* Mode: single voice vs two-speaker dialogue */}
