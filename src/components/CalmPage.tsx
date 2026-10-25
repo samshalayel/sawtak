@@ -308,7 +308,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-3xl lg:max-w-none mx-auto space-y-4">
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-extrabold text-white flex items-center justify-center gap-2"><Leaf className="w-6 h-6 text-emerald-400" /> ريلز السكينة</h2>
         <p className="text-sm text-slate-400">لحظة هدوء: مشاهد طبيعة حقيقية، وصوت دافئ هادئ، وكلمات تُريح القلب.</p>
@@ -378,7 +378,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         ) : loadingClips ? (
           <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-emerald-400" /></div>
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
             {clips.map(c => {
               const order = chosen.indexOf(c.id);
               return (

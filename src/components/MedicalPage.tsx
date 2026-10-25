@@ -224,7 +224,7 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
   const tooLong = text.length > limit;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-3xl lg:max-w-none mx-auto space-y-4">
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-extrabold text-white flex items-center justify-center gap-2"><Stethoscope className="w-6 h-6 text-sky-400" /> بطاقات وريلز طبية</h2>
         <p className="text-sm text-slate-400">اكتب معلومتك الطبية، راجعها بمساعدة الذكاء الاصطناعي، وانشرها ببطاقة أو ريل يحمل اسمك.</p>
@@ -339,7 +339,7 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
             ) : loadingBg ? (
               <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-sky-400" /></div>
             ) : needPhotos ? (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
                 {photos.map(p => (
                   <button key={p.id} type="button" onClick={() => setPhotoId(p.id)} className={`relative aspect-[4/5] rounded-xl overflow-hidden border-2 ${photoId === p.id ? 'border-sky-400' : 'border-transparent'}`}>
                     <img src={p.thumb} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
@@ -348,7 +348,7 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
                 {clips.map(c => {
                   const order = chosen.indexOf(c.id);
                   return (

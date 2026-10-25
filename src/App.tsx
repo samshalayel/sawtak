@@ -745,7 +745,7 @@ export default function App() {
         <ServiceOff />
       </main>
       ) : view === 'press' ? (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <PressPage
           user={user}
           onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
@@ -762,7 +762,7 @@ export default function App() {
         )}
       </main>
       ) : view === 'calm' ? (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <CalmPage
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}
@@ -772,7 +772,7 @@ export default function App() {
         />
       </main>
       ) : view === 'medical' ? (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <MedicalPage
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}
@@ -782,7 +782,7 @@ export default function App() {
         />
       </main>
       ) : view === 'greetings' ? (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <GreetingsPage
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}

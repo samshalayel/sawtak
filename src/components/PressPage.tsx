@@ -233,7 +233,7 @@ export const PressPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, o
   const fileBase = useMemo(() => `${(title || spec.label).replace(/[\\/:*?"<>|]+/g, '').slice(0, 40)}`, [title, spec.label]);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-3xl lg:max-w-none mx-auto space-y-4">
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-extrabold text-white flex items-center justify-center gap-2"><Newspaper className="w-6 h-6 text-amber-400" /> استوديو الصحفيين</h2>
         <p className="text-sm text-slate-400">الصق مقالك، ونحوّله إلى بودكاست أو نشرة أو ملخص مسموع، بصوت طبيعي وفيديو بهوية مؤسستك.</p>

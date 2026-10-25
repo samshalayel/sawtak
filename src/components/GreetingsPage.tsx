@@ -443,7 +443,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-3xl lg:max-w-none mx-auto space-y-4">
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-extrabold text-white">تهنئة بالصوت</h2>
         <p className="text-sm text-slate-400">اختر المناسبة واكتب الاسم، ونصنع لك فيديو تهنئة بصوت طبيعي جاهزاً للواتساب والحالات.</p>
@@ -470,7 +470,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
       {/* 1. Occasion */}
       <div className={section}>
         <div className={label}>{stepNo(1)} المناسبة</div>
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
           {OCCASIONS.map(o => {
             const Icon = o.icon;
             const active = o.id === occasion.id;
@@ -602,7 +602,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
       {/* 4. Voice */}
       <div className={section}>
         <div className={label}>{stepNo(4)} الصوت</div>
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-2">
           {voices.map(v => (
             <div
               key={v.id}
