@@ -46,19 +46,21 @@ const BLOCKED_TAGS = [
   'protest', 'riot', 'crash', 'accident', 'storm', 'lightning', 'tornado', 'hurricane', 'flood', 'earthquake', 'scary', 'horror',
 ];
 
-interface Clip { id: number; duration: number; tags: string; thumb: string; preview: string; url: string; width: number; height: number }
+export interface Clip { id: number; duration: number; tags: string; thumb: string; preview: string; url: string; width: number; height: number }
 const searchCache = new Map<string, { at: number; clips: Clip[] }>();
 const clipIndex = new Map<number, Clip>(); // clips seen in searches, so render requests can only use vetted ids
 
-const isCalm = (tags: string) => {
+export const isCalm = (tags: string, extraBlocked: string[] = []) => {
   const words = tags.toLowerCase().split(/[,\s]+/);
-  return !BLOCKED_TAGS.some(b => words.includes(b));
+  return ![...BLOCKED_TAGS, ...extraBlocked].some(b => words.includes(b));
 };
 
-async function searchClips(query: string): Promise<Clip[]> {
+/** Pixabay videos for a query, minus anything tagged with a blocked word (`extraBlocked` adds to the calm list). */
+export async function searchClips(query: string, extraBlocked: string[] = []): Promise<Clip[]> {
   const key = process.env.PIXABAY_API_KEY;
   if (!key) throw Object.assign(new Error('PIXABAY_API_KEY missing'), { code: 'NO_KEY' });
-  const cached = searchCache.get(query);
+  const cacheKey = `${query}|${extraBlocked.join(',')}`;
+  const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.clips;
 
   const url = `${PIXABAY}?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&safesearch=true&per_page=40&video_type=film`;
@@ -66,7 +68,7 @@ async function searchClips(query: string): Promise<Clip[]> {
   if (!res.ok) throw new Error(`Pixabay ${res.status}`);
   const data = await res.json();
   const clips: Clip[] = (data.hits ?? [])
-    .filter((h: any) => isCalm(String(h.tags || '')) && h.duration >= 5)
+    .filter((h: any) => isCalm(String(h.tags || ''), extraBlocked) && h.duration >= 5)
     .map((h: any) => {
       const v = h.videos ?? {};
       // ~1080p is plenty for a 720x1280 vertical crop and keeps downloads small
@@ -79,7 +81,7 @@ async function searchClips(query: string): Promise<Clip[]> {
     })
     .filter((c: Clip) => c.url);
   for (const c of clips) clipIndex.set(c.id, c);
-  searchCache.set(query, { at: Date.now(), clips });
+  searchCache.set(cacheKey, { at: Date.now(), clips });
   return clips;
 }
 
@@ -112,6 +114,8 @@ export interface CalmRenderOptions {
   /** Quran reels: one entry per verse with its exact span in `voice` (seconds); replaces the timing guessed from text. */
   verses?: { text: string; start: number; end: number }[];
   title: string;          // optional line at the top
+  /** Medical reels: the doctor's identity (logo, name, specialty, contact) along the bottom for the whole reel. */
+  brand?: { logo: Buffer | null; lines: string[]; color: string };
   supportCard: string;    // optional closing card text (empty = none)
   domain: string;
   style?: CalmStyle;
@@ -302,6 +306,31 @@ async function textOverlays(o: CalmRenderOptions, voiceStart: number, voiceEnd: 
   return out.filter(t => t.end - t.start > 0.2);
 }
 
+/** The identity strip of a medical reel: a translucent rounded box with the logo on the right and up to 3 lines. */
+async function brandStrip(b: NonNullable<CalmRenderOptions['brand']>) {
+  const width = W - 80;
+  const logoSize = b.logo ? 96 : 0;
+  const lines = await Promise.all(b.lines.filter(Boolean).slice(0, 3).map((t, i) =>
+    textPng(t, { font: 'cairo', size: i === 0 ? 34 : 26, color: '#ffffff', width: width - logoSize - 60 })));
+  const textH = lines.reduce((s, l) => s + l.height - 2 * l.pad, 0) + Math.max(0, lines.length - 1) * 6;
+  const height = Math.max(logoSize, textH) + 36;
+  const layers: { input: Buffer; left: number; top: number }[] = [];
+  if (b.logo) {
+    const mask = Buffer.from(`<svg width="${logoSize}" height="${logoSize}"><circle cx="${logoSize / 2}" cy="${logoSize / 2}" r="${logoSize / 2}" fill="#fff"/></svg>`);
+    const round = await sharp(b.logo).resize(logoSize, logoSize, { fit: 'cover' }).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+    layers.push({ input: round, left: width - logoSize - 18, top: Math.round((height - logoSize) / 2) });
+  }
+  let y = Math.round((height - textH) / 2);
+  for (const l of lines) {
+    // Right-aligned next to the logo (Arabic reads from the right)
+    layers.push({ input: l.png, left: Math.max(0, width - logoSize - 34 - l.width), top: y - l.pad });
+    y += l.height - 2 * l.pad + 6;
+  }
+  const box = Buffer.from(`<svg width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="26" fill="#0b1220" fill-opacity="0.62"/><rect x="0" y="${height - 6}" width="${width}" height="6" rx="3" fill="${b.color}"/></svg>`);
+  const png = await sharp(box).composite(layers).png().toBuffer();
+  return { png, width, height };
+}
+
 export function renderCalmReel(o: CalmRenderOptions): Promise<Buffer> {
   return enqueueRender(() => renderNow(o), o.onStart);
 }
@@ -344,6 +373,11 @@ async function renderNow(o: CalmRenderOptions): Promise<Buffer> {
       const art = await dayArt(sk.day ?? new Date().getDay(), sk.theme, lay.artW, lay.artH);
       await fs.writeFile(path.join(dir, 'day.png'), art.png);
       pictures.push({ file: 'day.png', x: Math.round((W - art.width) / 2), y: lay.labelY + lay.artH - art.height + art.pad, start: 0.5, end: total, fade: 0.9, fadeOut: false });
+    }
+    if (o.brand) {
+      const strip = await brandStrip(o.brand);
+      await fs.writeFile(path.join(dir, 'brand.png'), strip.png);
+      pictures.push({ file: 'brand.png', x: Math.round((W - strip.width) / 2), y: H - strip.height - 92, start: 0.6, end: total, fade: 0.8, fadeOut: false });
     }
     const texts = await textOverlays(o, voiceStart, voiceEnd, total);
     for (const [k, t] of texts.entries()) {
@@ -409,7 +443,7 @@ calmRouter.get('/search', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Calm search failed:', err?.message || err);
-    res.status(err?.code === 'NO_KEY' ? 503 : 502).json({ success: false, error: 'تعذّر جلب المشاهد حالياً، يرجى المحاولة لاحقاً.' });
+    res.status(503).json({ success: false, error: 'تعذّر جلب المشاهد حالياً، يرجى المحاولة لاحقاً.' });
   }
 });
 

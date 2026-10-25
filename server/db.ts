@@ -190,6 +190,8 @@ export interface AppSettings {
   costMotionLibrary: number;         // default 100 pts
   costMotionFree: number;            // default 500 pts
   costCalmReel: number;              // default 30 pts per calm reel (AI voice or Quran recitation)
+  costMedicalCard: number;           // default 15 pts per medical card image
+  costMedicalReel: number;           // default 30 pts per medical reel (voice included)
   // Service switches, 1 = on, 0 = off (see server/services.ts)
   serviceTts: number;
   serviceDialogue: number;
@@ -198,6 +200,7 @@ export interface AppSettings {
   serviceMotion: number;
   servicePress: number;
   servicePayments: number;
+  serviceMedical: number;
   generationsPerMinute: number;      // per-user rate limit
   // USD per 1M tokens, copied from https://ai.google.dev/pricing — used only for the admin cost report
   ttsInputPricePerM: number;
@@ -223,6 +226,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   costMotionLibrary: 100,
   costMotionFree: 500,
   costCalmReel: 30,
+  costMedicalCard: 15,
+  costMedicalReel: 30,
   serviceTts: 1,
   serviceDialogue: 1,
   serviceGreetings: 1,
@@ -230,6 +235,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   serviceMotion: 1,
   servicePress: 1,
   servicePayments: 1,
+  serviceMedical: 1,
   contactWhatsapp: '',
   moderationMode: 'block',
   // Off until a paid key answers fast enough: on free keys the text model can take up to a minute

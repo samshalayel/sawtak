@@ -32,6 +32,8 @@ const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { serviceGate, serviceBlocked } = await import('./server/services.ts');
+const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines } = await import('./server/medical.ts');
+const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
 const { moderateFull, BLOCKED_MESSAGE } = await import('./server/moderation.ts');
 const { jawwalRouter } = await import('./server/jawwal.ts');
 
@@ -52,6 +54,7 @@ const smallJson = express.json({ limit: '1mb' });
 const largeJson = express.json({ limit: '30mb' });
 const LARGE_BODY_PATHS = new Set([
   '/api/video/render', '/api/admin/custom-voices', '/api/greetings/batch', '/api/brand', '/api/press/master', '/api/press/video',
+  '/api/medical/profile',
 ]);
 app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? largeJson : smallJson)(req, res, next));
 app.use(loadUser);
@@ -987,6 +990,71 @@ app.post('/api/press/overlay/render', requireAuth, requireVerifiedEmail, async (
 
 app.use('/api/calm', calmRouter);
 app.use('/api/quran', quranRouter);
+app.use('/api/medical', createMedicalRouter({ textModel: TEXT_MODEL, usageTokens, passesModeration }));
+
+// Medical reel: the doctor's information read by an AI voice over calm real scenes, with the doctor's identity along
+// the bottom and the fixed disclaimer as the closing card (see server/medical.ts)
+app.post('/api/medical/reel', requireAuth, requireVerifiedEmail, async (req, res) => {
+  const body = req.body ?? {};
+  const text = String(body.text || '').trim().slice(0, MEDICAL_LIMITS.reelBody);
+  const title = String(body.title || '').trim().slice(0, MEDICAL_LIMITS.title);
+  const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Charon';
+  const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
+  const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
+  if (text.length < 10) return res.status(400).json({ success: false, error: 'اكتب المعلومة الطبية أولاً' });
+  if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
+  if (!(await passesModeration(req, res, `${title}
+${text}`, 'video'))) return;
+  if (!videoLimiter(`user:${req.user!.id}`)) {
+    return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
+  }
+
+  // The reel costs its fixed price (or the voice price if a long text costs more)
+  const reel = { minPoints: getSettings().costMedicalReel, note: `ريل طبي · ${title || 'معلومة طبية'}` };
+  let held = 0;
+  try {
+    held = reserveCredits(req.user!.id, estimateCredits(text, 0.95, reel.minPoints));
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل حوالي ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
+    }
+    throw err;
+  }
+  let wav: Buffer;
+  let balance: number;
+  try {
+    const style = buildStyleDirective({
+      dialect, toneStyle: 'educational_tutor', speed: 0.95, pitch: 0,
+      customStylePrompt: 'صوت طبيب هادئ وواضح وموثوق، يشرح للمرضى بلطف وبدون تهويل',
+    });
+    const r = await synthesizeSpeech(text, voice, style);
+    if (!r.wav) throw new Error('No audio');
+    wav = r.wav;
+    const audioSeconds = pcmSeconds(wav);
+    const tokens = usageTokens(r.response);
+    ({ balance } = settleTtsCharge({
+      userId: req.user!.id, feature: 'tts', model: TTS_MODEL, voice, chars: text.length,
+      promptTokens: tokens.promptTokens, outputTokens: tokens.outputTokens || Math.round(audioSeconds * AUDIO_TOKENS_PER_SECOND),
+      audioSeconds, apiKeyId: r.keyId,
+    }, held, reel));
+    held = 0;
+  } catch (err) {
+    if (held > 0) releaseCredits(req.user!.id, held);
+    return sendFriendlyError(res, err, 'Medical reel voice');
+  }
+
+  const profile = getDoctorProfile(req.user!.id);
+  const logo = await readDoctorLogo(req.user!.id);
+  const lines = identityLines(profile);
+  const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
+  videoJobs.set(job.id, job);
+  startCalmRender(job, {
+    clips: clips as any, voice: wav, text, title, supportCard: MEDICAL_DISCLAIMER, sticker: null, domain: watermarkDomain(req.hostname),
+    style: clampCalmStyle({ font: 'cairo', color: '#ffffff', size: 78, y: 740, titleSize: 54 }),
+    brand: lines.length || logo ? { logo, lines, color: profile?.color ?? '#0ea5e9' } : undefined,
+  });
+  res.status(202).json({ success: true, jobId: job.id, balance });
+});
 app.use('/api/jawwal', jawwalRouter);
 
 app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res) => {

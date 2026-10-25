@@ -3,7 +3,7 @@
 import express from 'express';
 import { AppSettings, getSettings } from './db.ts';
 
-export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'motion', 'press', 'payments'] as const;
+export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'motion', 'press', 'payments', 'medical'] as const;
 export type ServiceId = (typeof SERVICES)[number];
 
 /** The setting behind each switch (1 = on, 0 = off). */
@@ -15,6 +15,7 @@ export const SERVICE_SETTING: Record<ServiceId, keyof AppSettings> = {
   motion: 'serviceMotion',
   press: 'servicePress',
   payments: 'servicePayments',
+  medical: 'serviceMedical',
 };
 
 export const SERVICE_OFF_MESSAGE = 'هذه الخدمة متوقفة مؤقتاً، يرجى المحاولة لاحقاً.';
@@ -45,6 +46,7 @@ function serviceOf(method: string, path: string): ServiceId | null {
   if (path === '/api/motion/script' || path === '/api/motion/jobs') return 'motion';
   if (path.startsWith('/api/press/')) return 'press';
   if (path === '/api/jawwal/otp' || path === '/api/jawwal/pay') return 'payments';
+  if (path === '/api/medical/review' || path === '/api/medical/card' || path === '/api/medical/reel') return 'medical';
   return null;
 }
 

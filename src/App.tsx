@@ -13,9 +13,10 @@ import { TermsPage } from './components/TermsPage';
 import { GreetingsPage } from './components/GreetingsPage';
 import { PressPage } from './components/PressPage';
 import { CalmPage } from './components/CalmPage';
+import { MedicalPage } from './components/MedicalPage';
 import { MotionTab } from './components/MotionTab';
 import { MobileAppNav } from './components/MobileAppNav';
-import { PartyPopper, Newspaper, Leaf } from 'lucide-react';
+import { PartyPopper, Newspaper, Leaf, Stethoscope } from 'lucide-react';
 import { LandingPage } from './components/LandingPage';
 import { DialogueVoicePicker, DialogueSpeaker } from './components/DialogueVoicePicker';
 import { DialogueEditor } from './components/DialogueEditor';
@@ -50,7 +51,7 @@ import {
 } from 'lucide-react';
 
 // "home" = landing page for visitors (logged-in users land in the studio)
-type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'motion';
+type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'motion' | 'medical';
 const readView = (): View => {
   const hash = window.location.hash;
   if (hash === '#/admin') return 'admin';
@@ -59,6 +60,7 @@ const readView = (): View => {
   if (hash === '#/press') return 'press';
   if (hash === '#/calm') return 'calm';
   if (hash === '#/motion') return 'motion';
+  if (hash === '#/medical') return 'medical';
   if (hash === '#/studio') return 'studio';
   const appLike = window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(max-width: 639px)').matches;
   return appLike ? 'studio' : 'home';
@@ -724,7 +726,7 @@ export default function App() {
           onCurrentUserCreditsChange={(credits) => setUser(prev => (prev ? { ...prev, credits } : prev))}
         />
       </main>
-      ) : (['press', 'greetings', 'calm', 'motion'] as const).some(v => view === v && !serviceOn(v)) ? (
+      ) : (['press', 'greetings', 'calm', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v)) ? (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <ServiceOff />
       </main>
@@ -748,6 +750,16 @@ export default function App() {
       ) : view === 'calm' ? (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <CalmPage
+          user={user}
+          prices={config.prices ?? DEFAULT_PRICES}
+          onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
+          onBalance={balance => setUser(prev => (prev ? { ...prev, credits: balance } : prev))}
+          onOpenPackages={() => setShowPackages(true)}
+        />
+      </main>
+      ) : view === 'medical' ? (
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
+        <MedicalPage
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}
           onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
@@ -817,6 +829,18 @@ export default function App() {
             <div className="text-xs opacity-90">مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة</div>
           </div>
           <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">جرّبها</span>
+        </a>}
+        {serviceOn('medical') && <a
+          href="#/medical"
+          className="flex items-center gap-3 rounded-2xl px-4 py-3 text-[#ffffff] shadow-lg hover:brightness-110 transition"
+          style={{ background: 'linear-gradient(110deg, #075985, #0ea5e9)' }}
+        >
+          <Stethoscope className="w-7 h-7 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="font-extrabold text-sm">بطاقات وريلز طبية</div>
+            <div className="text-xs opacity-90">اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك</div>
+          </div>
+          <span className="text-xs font-bold bg-[#ffffff]/20 rounded-lg px-2.5 py-1 whitespace-nowrap">ابدأ</span>
         </a>}
 
         {!serviceOn('tts') && !serviceOn('dialogue') && <ServiceOff />}

@@ -295,7 +295,7 @@ authRouter.get('/me', (req, res) => {
     config: {
       signupBonusCredits, maxTextChars, contactWhatsapp, googleEnabled: isGoogleEnabled(),
       // Service prices in points, so every page shows what will actually be charged
-      prices: { voicePerMinute: s.costTtsPerMinute, greeting: s.costGreeting, calmReel: s.costCalmReel, motionLibrary: s.costMotionLibrary, motionFree: s.costMotionFree },
+      prices: { voicePerMinute: s.costTtsPerMinute, greeting: s.costGreeting, calmReel: s.costCalmReel, motionLibrary: s.costMotionLibrary, motionFree: s.costMotionFree, medicalCard: s.costMedicalCard, medicalReel: s.costMedicalReel },
       // Which services are on (stopped ones are hidden; admins still see and use them)
       services: serviceStatus(),
     },

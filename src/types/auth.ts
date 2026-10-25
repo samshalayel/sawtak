@@ -16,10 +16,12 @@ export interface ServicePrices {
   calmReel: number;      // per calm reel (AI voice or Quran recitation)
   motionLibrary: number;
   motionFree: number;
+  medicalCard: number;
+  medicalReel: number;
 }
-export const DEFAULT_PRICES: ServicePrices = { voicePerMinute: 10, greeting: 25, calmReel: 30, motionLibrary: 100, motionFree: 500 };
+export const DEFAULT_PRICES: ServicePrices = { voicePerMinute: 10, greeting: 25, calmReel: 30, motionLibrary: 100, motionFree: 500, medicalCard: 15, medicalReel: 30 };
 
-export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'motion' | 'press' | 'payments';
+export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'motion' | 'press' | 'payments' | 'medical';
 
 export interface PublicConfig {
   /** Service switches from the admin settings (missing = on). Stopped services are hidden from customers. */

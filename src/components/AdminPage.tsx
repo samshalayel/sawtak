@@ -113,6 +113,8 @@ interface AppSettings {
   costMotionLibrary: number;
   costMotionFree: number;
   costCalmReel: number;
+  costMedicalCard: number;
+  costMedicalReel: number;
   serviceTts: number;
   serviceDialogue: number;
   serviceGreetings: number;
@@ -120,6 +122,7 @@ interface AppSettings {
   serviceMotion: number;
   servicePress: number;
   servicePayments: number;
+  serviceMedical: number;
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -843,6 +846,8 @@ const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string
   { key: 'costTtsPerMinute',   label: 'نص → صوت', icon: '🎙️', hint: 'نقطة لكل دقيقة صوت (الاستوديو، الحوار، تقديم المذيع)' },
   { key: 'costGreeting',       label: 'بطاقة تهنئة', icon: '🎴', hint: 'نقطة للبطاقة شاملة الصوت والفيديو (أو سعر الصوت إن كان أطول)' },
   { key: 'costCalmReel',       label: 'ريل سكينة', icon: '🍃', hint: 'نقطة للريل شامل الصوت أو تلاوة القارئ (أو سعر الصوت إن كان أطول)' },
+  { key: 'costMedicalCard',    label: 'بطاقة طبية', icon: '🩺', hint: 'نقطة للبطاقة (صورة)، والمراجعة الذكية مجانية' },
+  { key: 'costMedicalReel',    label: 'ريل طبي', icon: '🎞️', hint: 'نقطة للريل شامل الصوت (أو سعر الصوت إن كان أطول)' },
   { key: 'costMotionLibrary',  label: 'ريلز — نسق جاهز', icon: '🎬', hint: 'نقطة للفيديو الواحد' },
   { key: 'costMotionFree',     label: 'ريلز — نسق حر', icon: '✨', hint: 'نقطة للفيديو الواحد' },
 ];
@@ -856,6 +861,7 @@ const SERVICE_SWITCHES: { key: keyof AppSettings; label: string; icon: string }[
   { key: 'serviceMotion', label: 'الموشن جرافيك', icon: '🎬' },
   { key: 'servicePress', label: 'استوديو الصحفيين', icon: '📰' },
   { key: 'servicePayments', label: 'الدفع بجوال باي', icon: '💳' },
+  { key: 'serviceMedical', label: 'البطاقات والريلز الطبية', icon: '🩺' },
 ];
 
 const SETTING_FIELDS: { key: Exclude<keyof AppSettings, 'contactWhatsapp'>; label: string; hint: string; step?: string; points?: boolean }[] = [
