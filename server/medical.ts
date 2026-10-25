@@ -135,7 +135,8 @@ const SCREEN_PROMPT = `You screen background images for health-awareness posts a
 Below are numbered images (a video is shown as three frames side by side).
 Flag an image if it shows ANY woman or girl of any age, in any way: even small, partial (a hand with nail polish, long hair,
 legs, a face in the corner), in the background, blurred, as a silhouette, a drawing, a statue, a mannequin or a reflection.
-Also flag anything immodest or romantic. Men, boys, objects, food and scenery are fine.
+Also flag anything immodest or romantic, and any image with people whose gender you cannot tell (a crowd, tiny
+figures far away, people seen from behind). Men, boys, objects, food and scenery are fine.
 When you are not sure, flag it. Return the numbers of all flagged images in "flagged".`;
 
 interface Candidate { key: string; image: () => Promise<Buffer> }
@@ -154,12 +155,13 @@ async function screen(cands: Candidate[], deps: MedicalDeps, userId: number): Pr
   let failures = 0;
   await Promise.all(batches.map(async batch => {
     const parts = [{ text: SCREEN_PROMPT }, ...batch.flatMap((b, i) => [{ text: `Image ${i + 1}:` }, { inlineData: { mimeType: 'image/jpeg', data: b.img.toString('base64') } }])];
-    for (const m of [{ model: deps.textModel, thinking: ThinkingLevel.LOW }, { model: 'gemini-3.5-flash-lite', thinking: ThinkingLevel.MINIMAL }]) {
+    // The light model first with a short limit (a customer is waiting on the spinner), the full one if it fails
+    for (const m of [{ model: 'gemini-3.5-flash-lite', thinking: ThinkingLevel.MINIMAL, timeout: 30_000 }, { model: deps.textModel, thinking: ThinkingLevel.LOW, timeout: 45_000 }]) {
       try {
         const r = await withGeminiFailover('medical-screen', client => client.models.generateContent({
           model: m.model,
           contents: [{ role: 'user', parts }],
-          config: { responseMimeType: 'application/json', responseJsonSchema: SCREEN_SCHEMA, thinkingConfig: { thinkingLevel: m.thinking }, httpOptions: { timeout: 90_000 } },
+          config: { responseMimeType: 'application/json', responseJsonSchema: SCREEN_SCHEMA, thinkingConfig: { thinkingLevel: m.thinking }, httpOptions: { timeout: m.timeout } },
         }), { cooldown: false });
         logUsage({ userId, feature: 'optimize', model: m.model, chars: 0, ...deps.usageTokens(r.result), apiKeyId: r.keyId });
         const flagged = new Set((JSON.parse(r.result.text || '{}').flagged ?? []).map(Number));
