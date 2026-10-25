@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, Image as ImageIcon, Loader2, Pause, Play, Share2, ShieldCheck, Sparkles, Stethoscope, Video, Wand2 } from 'lucide-react';
+import { AlertTriangle, Check, Download, Image as ImageIcon, Loader2, Mic, Pause, Play, Share2, ShieldCheck, Sparkles, Stethoscope, Video, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
 import { AuthUser, ServicePrices } from '../types/auth';
 import { DoctorProfile, MEDICAL_DISCLAIMER, MEDICAL_LIMITS, MEDICAL_SCENES, MEDICAL_THEMES, ReviewNote, ReviewResult } from '../data/medical';
@@ -337,7 +337,10 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
             {!user ? (
               <button type="button" onClick={() => login('سجّل حساباً لتتصفح الخلفيات.')} className="w-full py-6 rounded-xl border-2 border-dashed border-slate-700 text-slate-300 text-sm">سجّل الدخول لتتصفح الخلفيات</button>
             ) : loadingBg ? (
-              <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-sky-400" /></div>
+              <div className="flex flex-col items-center gap-2 py-8 text-xs text-slate-400">
+                <Loader2 className="w-6 h-6 animate-spin text-sky-400" />
+                نفحص الخلفيات لتناسب جمهورك… أول مرة لكل مشهد قد تستغرق حتى دقيقة.
+              </div>
             ) : needPhotos ? (
               <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
                 {photos.map(p => (
@@ -363,7 +366,7 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
                 })}
               </div>
             )}
-            <p className="text-[10px] text-slate-500">الخلفيات من Pixabay، ومُصفّاة من أي مشهد مزعج (دم، عمليات، إبر…).</p>
+            <p className="text-[10px] text-slate-500">الخلفيات من Pixabay، ومُصفّاة من أي مشهد مزعج (دم، عمليات، إبر…) ومن صور النساء.</p>
           </>
         )}
 
@@ -373,7 +376,10 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
               {REEL_VOICES.map(v => (
                 <div key={v.id} role="button" tabIndex={0} onClick={() => setVoiceId(v.id)}
                   className={`relative shrink-0 w-20 rounded-xl border p-1.5 flex flex-col items-center gap-1 cursor-pointer ${voiceId === v.id ? 'border-sky-500 bg-sky-500/10' : 'border-slate-800 bg-slate-950/40'}`}>
-                  <img src={v.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+                  {/* No photos of women for this audience: a female voice shows an icon instead */}
+                  {v.gender === 'female'
+                    ? <span className="w-10 h-10 rounded-full bg-sky-500/10 text-sky-300 flex items-center justify-center"><Mic className="w-5 h-5" /></span>
+                    : <img src={v.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />}
                   <span className="text-[11px] text-white">{v.name}</span>
                   <button type="button" onClick={e => { e.stopPropagation(); preview(v.id); }} className="absolute top-1 left-1 w-5 h-5 rounded-full bg-slate-800 text-slate-200 flex items-center justify-center" aria-label={`استماع لعيّنة ${v.name}`}>
                     {playing === v.id ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}

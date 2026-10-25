@@ -17,15 +17,18 @@ export const MEDICAL_THEMES: MedicalTheme[] = [
   { id: 'eye', label: 'العيون', from: '#312e81', to: '#6366f1', icon: 'eye' },
 ];
 
-/** Background scenes (real photos and videos from Pixabay), filtered so nothing distressing is shown. */
+/**
+ * Background scenes (real photos and videos from Pixabay), filtered so nothing distressing is shown. The audience is
+ * conservative, so the searches lean on objects, scenery and men, and no woman or girl is ever shown (server/medical.ts).
+ */
 export const MEDICAL_SCENES: { id: string; label: string; query: string }[] = [
   { id: 'food', label: 'غذاء صحي', query: 'healthy food vegetables fruit' },
-  { id: 'exercise', label: 'رياضة', query: 'exercise fitness walking' },
-  { id: 'doctor', label: 'طبيب وعيادة', query: 'doctor consultation clinic' },
-  { id: 'water', label: 'شرب الماء', query: 'drinking water glass' },
-  { id: 'sleep', label: 'نوم وراحة', query: 'sleep rest bed' },
-  { id: 'family', label: 'عائلة', query: 'happy family health' },
-  { id: 'nature', label: 'طبيعة', query: 'nature walk park' },
+  { id: 'exercise', label: 'رياضة', query: 'man running sport' },
+  { id: 'doctor', label: 'طبيب وعيادة', query: 'stethoscope doctor medical' },
+  { id: 'water', label: 'شرب الماء', query: 'water glass drink' },
+  { id: 'sleep', label: 'نوم وراحة', query: 'bedroom pillow bed' },
+  { id: 'family', label: 'أب وأبناء', query: 'father son' },
+  { id: 'nature', label: 'طبيعة', query: 'nature landscape trees' },
   { id: 'lab', label: 'مختبر وعلوم', query: 'laboratory science microscope' },
 ];
 

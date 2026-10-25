@@ -3,8 +3,12 @@
 // (here) or a short reel (the render route lives in server.ts next to the other video jobs). Every card and reel
 // carries the doctor's identity and a fixed disclaimer that cannot be removed.
 import express from 'express';
+import crypto from 'crypto';
+import { execFile } from 'child_process';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
+import { promisify } from 'util';
 import sharp from 'sharp';
 import { ThinkingLevel } from '@google/genai';
 import { db, getSettings } from './db.ts';
@@ -24,6 +28,10 @@ export const MEDICAL_BLOCKED_TAGS = [
   'surgery', 'surgical', 'operation', 'surgeon', 'scalpel', 'syringe', 'needle', 'injection', 'vaccine', 'wound', 'injury',
   'scar', 'corpse', 'autopsy', 'vomit', 'cancer', 'tumor', 'sick', 'illness', 'disease', 'virus', 'pandemic', 'coronavirus',
   'covid', 'emergency', 'ambulance', 'xray', 'x-ray', 'skeleton', 'skull', 'pain', 'crying',
+  // The audience is conservative: no women or girls (the vision check below catches what tags miss)
+  'woman', 'women', 'girl', 'girls', 'female', 'lady', 'ladies', 'mother', 'mom', 'mum', 'mommy', 'wife', 'bride',
+  'daughter', 'sister', 'grandmother', 'granny', 'businesswoman', 'nurse', 'model', 'makeup', 'cosmetics', 'fashion',
+  'dress', 'bikini', 'swimsuit', 'lingerie', 'sexy', 'pregnant', 'pregnancy', 'yoga', 'feminine', 'couple', 'romantic',
 ];
 
 // ── doctor profile ───────────────────────────────────────────────────────────
@@ -75,6 +83,115 @@ async function searchPhotos(query: string): Promise<Photo[]> {
   for (const p of photos) photoIndex.set(p.id, p);
   photoCache.set(query, { at: Date.now(), photos });
   return photos;
+}
+
+// ── no women or girls ────────────────────────────────────────────────────────
+// The audience is conservative, so a background never shows a woman or girl. Tags catch some (MEDICAL_BLOCKED_TAGS);
+// every photo and clip is also looked at by a vision model (a clip as three frames: start, middle and end) and only
+// what passes is offered or accepted. Each verdict is stored, so a background is checked once.
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS medical_bg_checks (
+    key TEXT PRIMARY KEY,
+    ok INTEGER NOT NULL,
+    checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+const verdictOf = (key: string) => (db.prepare('SELECT ok FROM medical_bg_checks WHERE key = ?').get(key) as { ok: number } | undefined)?.ok;
+const saveVerdict = (key: string, ok: boolean) => db.prepare('INSERT OR REPLACE INTO medical_bg_checks (key, ok) VALUES (?, ?)').run(key, ok ? 1 : 0);
+
+/** Whether a background passed the check: `p:<id>` for a photo, `v:<id>` for a clip. */
+export const backgroundApproved = (key: string) => verdictOf(key) === 1;
+
+const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
+const run = promisify(execFile);
+
+/** A small JPEG of a photo for the check. */
+async function photoPreview(url: string) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`Photo ${res.status}`);
+  return sharp(Buffer.from(await res.arrayBuffer())).resize(384, 384, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
+}
+
+/** Three frames of a clip (start, middle, end) side by side in one JPEG, from its small preview video. */
+export async function clipPreview(url: string, duration: number) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`Clip ${res.status}`);
+  const file = path.join(os.tmpdir(), `sawtik-medcheck-${crypto.randomBytes(6).toString('hex')}.mp4`);
+  await fs.writeFile(file, Buffer.from(await res.arrayBuffer()));
+  try {
+    const every = Math.max(1, duration / 3);
+    const { stdout } = await run(FFMPEG, ['-v', 'error', '-i', file, '-vf', `fps=1/${every.toFixed(2)},scale=256:-2,tile=3x1`, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', '-'],
+      { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024, timeout: 30_000 });
+    if (!stdout.length) throw new Error('No frames');
+    return stdout as Buffer;
+  } finally {
+    await fs.rm(file, { force: true });
+  }
+}
+
+const SCREEN_SCHEMA = { type: 'object', properties: { flagged: { type: 'array', items: { type: 'integer' } } }, required: ['flagged'] };
+const SCREEN_PROMPT = `You screen background images for health-awareness posts aimed at a conservative Muslim audience.
+Below are numbered images (a video is shown as three frames side by side).
+Flag an image if it shows ANY woman or girl of any age, in any way: even small, partial (a hand with nail polish, long hair,
+legs, a face in the corner), in the background, blurred, as a silhouette, a drawing, a statue, a mannequin or a reflection.
+Also flag anything immodest or romantic. Men, boys, objects, food and scenery are fine.
+When you are not sure, flag it. Return the numbers of all flagged images in "flagged".`;
+
+interface Candidate { key: string; image: () => Promise<Buffer> }
+
+/** Checks the candidates not seen before and returns the keys of all that passed. Fails closed. */
+async function screen(cands: Candidate[], deps: MedicalDeps, userId: number): Promise<Set<string>> {
+  const approved = new Set(cands.filter(c => verdictOf(c.key) === 1).map(c => c.key));
+  const todo = cands.filter(c => verdictOf(c.key) === undefined);
+  const ready: { key: string; img: Buffer }[] = [];
+  for (let i = 0; i < todo.length; i += 6) {
+    const got = await Promise.all(todo.slice(i, i + 6).map(async c => ({ key: c.key, img: await c.image().catch(() => null) })));
+    for (const g of got) if (g.img) ready.push(g as { key: string; img: Buffer });
+  }
+  const batches: (typeof ready)[] = [];
+  for (let i = 0; i < ready.length; i += 10) batches.push(ready.slice(i, i + 10));
+  let failures = 0;
+  await Promise.all(batches.map(async batch => {
+    const parts = [{ text: SCREEN_PROMPT }, ...batch.flatMap((b, i) => [{ text: `Image ${i + 1}:` }, { inlineData: { mimeType: 'image/jpeg', data: b.img.toString('base64') } }])];
+    for (const m of [{ model: deps.textModel, thinking: ThinkingLevel.LOW }, { model: 'gemini-3.5-flash-lite', thinking: ThinkingLevel.MINIMAL }]) {
+      try {
+        const r = await withGeminiFailover('medical-screen', client => client.models.generateContent({
+          model: m.model,
+          contents: [{ role: 'user', parts }],
+          config: { responseMimeType: 'application/json', responseJsonSchema: SCREEN_SCHEMA, thinkingConfig: { thinkingLevel: m.thinking }, httpOptions: { timeout: 90_000 } },
+        }), { cooldown: false });
+        logUsage({ userId, feature: 'optimize', model: m.model, chars: 0, ...deps.usageTokens(r.result), apiKeyId: r.keyId });
+        const flagged = new Set((JSON.parse(r.result.text || '{}').flagged ?? []).map(Number));
+        batch.forEach((b, i) => {
+          const ok = !flagged.has(i + 1);
+          saveVerdict(b.key, ok);
+          if (ok) approved.add(b.key);
+        });
+        return;
+      } catch (err: any) {
+        console.error(`Medical background check (${m.model}) failed:`, err?.message || err);
+      }
+    }
+    failures++;
+  }));
+  if (approved.size === 0 && (failures > 0 || ready.length < todo.length)) throw new Error('Background check failed');
+  return approved;
+}
+
+const screening = new Map<string, Promise<Set<string>>>(); // one check at a time per scene
+
+/** At most `limit` backgrounds of one search that passed the check (a search is screened in its first 30 results). */
+async function screened<T extends { id: number }>(kind: 'p' | 'v', scene: string, items: T[], image: (item: T) => Promise<Buffer>, deps: MedicalDeps, userId: number, limit = 24) {
+  const cands = items.slice(0, 30);
+  const job = `${kind}|${scene}`;
+  let p = screening.get(job);
+  if (!p) {
+    p = screen(cands.map(it => ({ key: `${kind}:${it.id}`, image: () => image(it) })), deps, userId).finally(() => screening.delete(job));
+    screening.set(job, p);
+  }
+  const approved = await p;
+  return cands.filter(it => approved.has(`${kind}:${it.id}`)).slice(0, limit);
 }
 
 /** A lucide icon as SVG markup (the same icon set the site uses). */
@@ -297,12 +414,13 @@ export function createMedicalRouter(deps: MedicalDeps) {
     const scene = MEDICAL_SCENES.find(s => s.id === req.query.scene);
     if (!scene) return res.status(400).json({ success: false, error: 'اختر نوع المشهد' });
     try {
+      const userId = req.user!.id;
       if (req.query.kind === 'video') {
-        const clips = await searchClips(scene.query, MEDICAL_BLOCKED_TAGS);
-        return res.json({ success: true, clips: clips.slice(0, 24).map(c => ({ id: c.id, duration: c.duration, thumb: c.thumb, preview: c.preview })) });
+        const clips = await screened('v', scene.id, await searchClips(scene.query, MEDICAL_BLOCKED_TAGS), c => clipPreview(c.preview, c.duration), deps, userId);
+        return res.json({ success: true, clips: clips.map(c => ({ id: c.id, duration: c.duration, thumb: c.thumb, preview: c.preview })) });
       }
-      const photos = await searchPhotos(scene.query);
-      res.json({ success: true, photos: photos.slice(0, 24).map(p => ({ id: p.id, thumb: p.thumb })) });
+      const photos = await screened('p', scene.id, await searchPhotos(scene.query), p => photoPreview(p.thumb), deps, userId);
+      res.json({ success: true, photos: photos.map(p => ({ id: p.id, thumb: p.thumb })) });
     } catch (err: any) {
       console.error('Medical backgrounds failed:', err?.message || err);
       res.status(503).json({ success: false, error: 'تعذّر جلب الخلفيات حالياً، يرجى المحاولة لاحقاً.' });
@@ -360,7 +478,7 @@ export function createMedicalRouter(deps: MedicalDeps) {
     if (!title || body.length < 10) return res.status(400).json({ success: false, error: 'اكتب عنواناً والمعلومة الطبية' });
     if (body.length > MEDICAL_LIMITS.body) return res.status(400).json({ success: false, error: `نص البطاقة طويل، اختصره إلى ${MEDICAL_LIMITS.body} حرف (أو اصنع ريلاً)` });
     const photoId = req.body?.photoId != null ? Number(req.body.photoId) : null;
-    if (photoId != null && !photoIndex.has(photoId)) return res.status(400).json({ success: false, error: 'اختر الخلفية من جديد (انتهت صلاحية البحث)' });
+    if (photoId != null && (!photoIndex.has(photoId) || !backgroundApproved(`p:${photoId}`))) return res.status(400).json({ success: false, error: 'اختر الخلفية من جديد (انتهت صلاحية البحث)' });
     if (!(await deps.passesModeration(req, res, `${title}\n${body}`, 'video'))) return;
     const price = getSettings().costMedicalCard;
     const { credits } = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId) as { credits: number };

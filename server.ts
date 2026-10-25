@@ -32,7 +32,7 @@ const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { serviceGate, serviceBlocked } = await import('./server/services.ts');
-const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines } = await import('./server/medical.ts');
+const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines, backgroundApproved } = await import('./server/medical.ts');
 const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
 const { moderateFull, BLOCKED_MESSAGE } = await import('./server/moderation.ts');
 const { jawwalRouter } = await import('./server/jawwal.ts');
@@ -1000,7 +1000,9 @@ app.post('/api/medical/reel', requireAuth, requireVerifiedEmail, async (req, res
   const title = String(body.title || '').trim().slice(0, MEDICAL_LIMITS.title);
   const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Charon';
   const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
-  const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
+  // Only clips that passed the medical background check (server/medical.ts)
+  const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3)
+    .filter((id: unknown) => backgroundApproved(`v:${Number(id)}`)).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
   if (text.length < 10) return res.status(400).json({ success: false, error: 'اكتب المعلومة الطبية أولاً' });
   if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
   if (!(await passesModeration(req, res, `${title}
