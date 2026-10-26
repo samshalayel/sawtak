@@ -10,8 +10,21 @@ import { BenchmarkRun, Span, SpanProvider, spanMs } from '../types/spans';
 type Style = 'library' | 'free';
 type PlanModel = 'sonnet' | 'haiku';
 
+type Timings = 'aws' | 'fast';
+
 /** The Claude model that wrote the plan or the free-style code (from its span). */
 const claudeModelOf = (spans: Span[]) => String(spans.find(s => s.provider === 'claude' && s.meta?.model)?.meta?.model ?? '');
+
+/** How the word timings were made (from the worker's spans) and how long that took. */
+function timingsOf(spans: Span[]): { label: string; ms: number } | null {
+  const fast = spans.find(s => s.name === 'timings-fast');
+  if (fast) return { label: 'سريع', ms: spanMs(fast) };
+  const aws = spans.find(s => s.name === 'transcribe');
+  const whisper = spans.find(s => s.name === 'whisper');
+  if (aws && !aws.error) return { label: 'AWS', ms: spanMs(aws) };
+  if (whisper) return { label: aws ? 'AWS ← whisper' : 'whisper', ms: spanMs(whisper) + (aws ? spanMs(aws) : 0) };
+  return aws ? { label: 'AWS (فشل)', ms: spanMs(aws) } : null;
+}
 
 const LIMIT_MS: Record<Style, number> = { library: 15 * 60_000, free: 60 * 60_000 };
 const POLL_MS = 3000;
@@ -134,6 +147,7 @@ export const BenchmarkTab: React.FC = () => {
   const [idea, setIdea] = useState('');
   const [style, setStyle] = useState<Style>('library');
   const [planModel, setPlanModel] = useState<PlanModel>('sonnet');
+  const [timings, setTimings] = useState<Timings>('aws');
   const [running, setRunning] = useState(false);
   const [spans, setSpans] = useState<Span[]>([]);
   const [step, setStep] = useState<string | null>(null);
@@ -181,7 +195,7 @@ export const BenchmarkTab: React.FC = () => {
       setStep('توليد الصوت');
       const job = await api<{ id: string }>('/api/motion/jobs', {
         method: 'POST',
-        body: JSON.stringify({ script: s.script, title: s.title, voice: 'Charon', formats: ['vertical'], dialect: 'levantine', tone: 'educational_tutor', style, look: 'classic', planModel }),
+        body: JSON.stringify({ script: s.script, title: s.title, voice: 'Charon', formats: ['vertical'], dialect: 'levantine', tone: 'educational_tutor', style, look: 'classic', planModel, timings }),
       });
       jobId = job.id;
 
@@ -253,6 +267,16 @@ export const BenchmarkTab: React.FC = () => {
               <option value="sonnet">Claude Sonnet</option>
               <option value="haiku">Claude Haiku (أسرع وأرخص)</option>
             </select>
+            <select
+              value={timings}
+              onChange={e => setTimings(e.target.value as Timings)}
+              disabled={running}
+              title="كيف تُحسب أوقات الكلمات: Amazon Transcribe يسمع الصوت، والتقدير السريع يوزّع كلمات السكربت على مقاطع الكلام"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 disabled:opacity-50"
+            >
+              <option value="aws">توقيت AWS</option>
+              <option value="fast">توقيت سريع على السيرفر</option>
+            </select>
             {running ? (
               <button type="button" onClick={() => (cancelled.current = true)} className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-sm font-bold flex items-center gap-1.5 whitespace-nowrap">
                 <StopCircle className="w-4 h-4" /> إيقاف
@@ -296,6 +320,7 @@ export const BenchmarkTab: React.FC = () => {
                   <th className={th}>الفكرة</th>
                   <th className={th}>النتيجة</th>
                   <th className={th}>الموديل</th>
+                  <th className={th}>التوقيت</th>
                   <th className={th}>المدة</th>
                   <th className={th}>التكلفة</th>
                   <th className={th}>أبطأ مرحلة</th>
@@ -304,12 +329,14 @@ export const BenchmarkTab: React.FC = () => {
               <tbody>
                 {history.map(r => {
                   const s = summarize(r.spans);
+                  const t = timingsOf(r.spans);
                   return (
                     <tr key={r.id} onClick={() => setSelected(r)} className={`border-b border-slate-800/60 cursor-pointer hover:bg-slate-800/40 ${selected?.id === r.id ? 'bg-slate-800/60' : ''}`}>
                       <td className={`${td} text-slate-400`}>{r.createdAt}</td>
                       <td className={`${td} max-w-[16rem] truncate text-slate-200`}>{r.idea || '—'}</td>
                       <td className={td}>{r.status === 'done' ? <span className="text-emerald-400">✓ تم</span> : <span className="text-rose-400" title={r.error ?? ''}>✗ فشل</span>}</td>
                       <td className={`${td} text-violet-300`} dir="ltr">{claudeModelOf(r.spans).replace(/^claude-/, '') || '—'}</td>
+                      <td className={`${td} text-teal-300 whitespace-nowrap`}>{t ? `${t.label} · ${fmtMs(t.ms)}` : '—'}</td>
                       <td className={`${td} tabular-nums`}>{fmtMs(r.totalMs)}</td>
                       <td className={`${td} tabular-nums text-amber-200`}>{fmtUsd(r.totalCostUsd)}</td>
                       <td className={`${td} text-slate-300`}>{s.slowest ? `${s.slowest.label} (${fmtMs(spanMs(s.slowest))})` : '—'}</td>

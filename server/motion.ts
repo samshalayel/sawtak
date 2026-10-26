@@ -246,6 +246,8 @@ export function createMotionRouter(deps: MotionDeps) {
         renderer: req.user!.role === 'admin' && (b.renderer === 'local' || b.renderer === 'lambda') ? b.renderer : undefined,
         // Claude model for the scene plan (admins comparing models in the performance test); the worker's default otherwise
         planModel: req.user!.role === 'admin' && ['sonnet', 'haiku', 'opus'].includes(b.planModel) ? b.planModel : undefined,
+        // Word timings (admins comparing Amazon Transcribe with the fast local estimate); the worker's default otherwise
+        timings: req.user!.role === 'admin' && (b.timings === 'aws' || b.timings === 'fast') ? b.timings : undefined,
         title: b.title ? String(b.title).slice(0, 100) : undefined,
         createdAt: Date.now(),
       }));
