@@ -6,6 +6,7 @@ import { invalidateModerationCache } from './moderation.ts';
 import { sendTestEmail } from './mailer.ts';
 import { requireAdmin, requireAuth } from './auth.ts';
 import { customVoicesRouter } from './custom-voices.ts';
+import { quranReelStats } from './quran-stats.ts';
 
 export const adminRouter = express.Router();
 adminRouter.use(requireAuth, requireAdmin);
@@ -75,7 +76,7 @@ adminRouter.get('/users', (req, res) => {
     WHERE u.deleted_at IS NULL AND (u.email LIKE ? OR u.name LIKE ?)
     GROUP BY u.id
     ORDER BY u.created_at DESC
-    LIMIT 200
+    LIMIT 5000
   `).all(q, q);
   res.json({ success: true, users });
 });
@@ -87,7 +88,7 @@ adminRouter.get('/users/:id/transactions', (req, res) => {
     LEFT JOIN users a ON a.id = t.admin_id
     WHERE t.user_id = ?
     ORDER BY t.id DESC
-    LIMIT 100
+    LIMIT 2000
   `).all(Number(req.params.id));
   res.json({ success: true, transactions: rows });
 });
@@ -164,8 +165,43 @@ adminRouter.patch('/users/:id', (req, res) => {
   res.json({ success: true, user: publicUser(getUserById(userId)!) });
 });
 
+// ---------- Quran reels ----------
+
+adminRouter.get('/quran', (req, res) => {
+  const days = Math.min(3650, Math.max(0, Math.floor(Number(req.query.days) || 0)));
+  res.json({ success: true, days, ...quranReelStats(days) });
+});
+
+// ---------- Fresh start before launch ----------
+// Clears the chosen statistics; users, their balances, settings, keys and Jawwal Pay payments are never touched.
+const RESETTABLE = {
+  usage: 'usage_events',              // usage and Google cost log (also the per-user "used" figures)
+  transactions: 'credit_transactions', // balance history (balances themselves stay)
+  quran: 'quran_reels',
+  moderation: 'moderation_events',
+  motion: 'motion_stats',
+  benchmark: 'benchmark_runs',
+} as const;
+
+adminRouter.post('/reset-stats', (req, res) => {
+  const chosen = (Object.keys(RESETTABLE) as (keyof typeof RESETTABLE)[]).filter(k => req.body?.[k] === true);
+  if (!chosen.length) return res.status(400).json({ success: false, error: 'اختر ما تريد مسحه' });
+  const deleted = transaction(() => {
+    const counts: Record<string, number> = {};
+    // Balance history points at usage rows: keep it valid when only the usage log goes
+    if (chosen.includes('usage') && !chosen.includes('transactions')) db.prepare('UPDATE credit_transactions SET usage_id = NULL').run();
+    for (const k of ['transactions', ...chosen.filter(c => c !== 'transactions')] as (keyof typeof RESETTABLE)[]) {
+      if (!chosen.includes(k)) continue;
+      counts[k] = Number(db.prepare(`DELETE FROM ${RESETTABLE[k]}`).run().changes);
+    }
+    return counts;
+  });
+  console.log(`Admin ${req.user!.email} cleared statistics:`, deleted);
+  res.json({ success: true, deleted });
+});
+
 adminRouter.get('/usage', (req, res) => {
-  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  const limit = Math.min(5000, Math.max(1, Number(req.query.limit) || 100));
   const rows = db.prepare(`
     SELECT e.*, u.email
     FROM usage_events e
@@ -296,7 +332,7 @@ adminRouter.get('/moderation', (_req, res) => {
     FROM moderation_events m
     LEFT JOIN users u ON u.id = m.user_id
     ORDER BY m.id DESC
-    LIMIT 200
+    LIMIT 2000
   `).all();
   res.json({ success: true, mode: getSettings().moderationMode, ai: getSettings().moderationAi, words, events });
 });

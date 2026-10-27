@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import { api, card, date, num, td, th, usd } from './adminShared';
+import { usePaged } from './Pager';
 
 interface ApiKeyInfo {
   id: number;
@@ -50,6 +51,7 @@ const smallBtn = 'px-2 py-1 rounded border border-slate-700 text-slate-300 hover
 
 export const KeysTab: React.FC = () => {
   const [keys, setKeys] = useState<ApiKeyInfo[] | null>(null);
+  const keysPage = usePaged(keys);
   const [newKey, setNewKey] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [busyId, setBusyId] = useState<number | 'add' | null>(null);
@@ -152,7 +154,8 @@ export const KeysTab: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {keys.map((k, i) => {
+              {keysPage.rows.map(k => {
+                const i = keys.indexOf(k);
                 const busy = busyId === k.id;
                 return (
                   <tr key={k.id} className="border-b border-slate-800/50 text-slate-200 align-top">
@@ -215,6 +218,7 @@ export const KeysTab: React.FC = () => {
               )}
             </tbody>
           </table>
+          {keysPage.pager}
         </div>
       )}
     </div>

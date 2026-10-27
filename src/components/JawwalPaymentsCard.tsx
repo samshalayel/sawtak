@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Smartphone } from 'lucide-react';
 import { api, card, td, th } from './adminShared';
+import { usePaged } from './Pager';
 
 // Admin overview: every Jawwal Pay attempt and the gateway mode. A charge that was not credited, or a payment call
 // that got no answer, is shown in red so it can be checked in Jawwal Pay and credited by hand.
@@ -21,6 +22,7 @@ const STATUS: Record<Payment['status'], { label: string; tone: string }> = {
 export const JawwalPaymentsCard: React.FC = () => {
   const [data, setData] = useState<{ mode: 'test' | 'live'; enabled: boolean; payments: Payment[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const page = usePaged(data?.payments);
 
   useEffect(() => {
     api<{ mode: 'test' | 'live'; enabled: boolean; payments: Payment[] }>('/api/jawwal/payments').then(setData).catch(e => setError(e.message));
@@ -51,7 +53,7 @@ export const JawwalPaymentsCard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {data.payments.map(p => (
+              {page.rows.map(p => (
                 <tr key={p.id} className="border-b border-slate-800/50 text-slate-200" title={p.error ?? ''}>
                   <td className={td}>{p.id}</td>
                   <td className={`${td} text-slate-400`}>{p.created_at}</td>
@@ -65,6 +67,7 @@ export const JawwalPaymentsCard: React.FC = () => {
               ))}
             </tbody>
           </table>
+          {page.pager}
         </div>
       )}
     </div>

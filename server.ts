@@ -32,6 +32,7 @@ const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { QURAN_RECITERS } = await import('./src/data/quran.ts');
+const { logQuranReel, finishQuranReel } = await import('./server/quran-stats.ts');
 const { serviceGate, serviceBlocked } = await import('./server/services.ts');
 const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines, backgroundApproved } = await import('./server/medical.ts');
 const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
@@ -1101,19 +1102,25 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   // The reciter's name, above the title by default (unless the customer turned it off)
   const reciterName = QURAN_RECITERS.find(r => r.id === quranPick.reciter)?.name;
   const info = body.showReciter !== false && reciterName ? `بصوت الشيخ ${reciterName}` : '';
+  const points = getSettings().costQuranReel;
   try {
-    chargePoints(req.user!.id, getSettings().costQuranReel, `ريل آيات · ${recitation.title}`);
+    chargePoints(req.user!.id, points, `ريل آيات · ${recitation.title}`);
   } catch (err) {
     if (err instanceof InsufficientCreditsError) {
       return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
     }
     throw err;
   }
+  // Logged for the admin "ريلز الآيات" tab
+  const logId = logQuranReel({
+    userId: req.user!.id, surah: quranPick.surah, surahName: recitation.title.split(' • ')[0].replace(/^سورة /, ''),
+    start: quranPick.start, end: quranPick.end, reciter: reciterName ?? quranPick.reciter, reelSeconds: recitation.seconds, points,
+  });
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
   startCalmRender(job, {
     clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, info, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
-  });
+  }, (ok, renderSeconds, error) => finishQuranReel(logId, ok, renderSeconds, error));
   res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
 });
 
@@ -1210,7 +1217,7 @@ function etaSeconds(job: VideoJob) {
 }
 
 /** Queues a calm reel and follows it on the job (both the AI-voice and the Quran reel). */
-function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCalmReel>[0], 'onStart' | 'onProgress'>) {
+function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCalmReel>[0], 'onStart' | 'onProgress'>, onDone?: (ok: boolean, renderSeconds: number, error?: string) => void) {
   // Length of the reel: the voice, a breath before it and the ending (longer with a support card)
   job.reelSeconds = pcmSeconds(options.voice) + (options.supportCard ? 5.7 : 3);
   job.estimate = job.reelSeconds * renderPace;
@@ -1224,7 +1231,9 @@ function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCa
     job.result = mp4;
     const took = (Date.now() - (job.startedAt ?? Date.now())) / 1000;
     if (job.reelSeconds && took > 1) renderPace = Math.min(6, Math.max(0.5, renderPace * 0.7 + (took / job.reelSeconds) * 0.3));
+    onDone?.(true, took);
   }).catch(error => {
+    onDone?.(false, job.startedAt ? (Date.now() - job.startedAt) / 1000 : 0, String(error?.message || error));
     job.status = 'error';
     if (error instanceof RenderBusyError) job.error = 'هناك فيديوهات أخرى قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.';
     else {

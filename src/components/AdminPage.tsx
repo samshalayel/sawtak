@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
-  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical, Smartphone
+  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical, Smartphone, BookOpen
 } from 'lucide-react';
 import { AuthUser, formatCredits, POINTS_TO_SECONDS } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
@@ -13,8 +13,11 @@ import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
 import { JawwalTab } from './JawwalTab';
 import { CUSTOMER_PACKAGES, packageBonusPoints, packageLabel, packageTotalSeconds } from '../data/packages';
+import { usePaged } from './Pager';
+import { QuranReelsTab } from './QuranReelsTab';
+import { ResetStatsCard } from './ResetStatsCard';
 
-type Tab = 'overview' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
+type Tab = 'overview' | 'quran' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
 
 interface UsageSummary {
   feature: 'tts' | 'dialogue' | 'tashkeel' | 'optimize' | 'script';
@@ -153,6 +156,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: 'نظرة عامة', icon: BarChart3 },
+    { id: 'quran', label: 'ريلز الآيات', icon: BookOpen },
     { id: 'users', label: 'المستخدمون', icon: Users },
     { id: 'usage', label: 'سجل الاستهلاك', icon: ListOrdered },
     { id: 'keys', label: 'مفاتيح API', icon: KeyRound },
@@ -188,6 +192,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
       </div>
 
       {tab === 'overview' && <Overview />}
+      {tab === 'quran' && <QuranReelsTab />}
       {tab === 'users' && <UsersTab currentUser={currentUser} onCurrentUserCreditsChange={onCurrentUserCreditsChange} />}
       {tab === 'usage' && <UsageTab />}
       {tab === 'keys' && <KeysTab />}
@@ -200,6 +205,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
         <div className="space-y-4">
           <SettingsTab />
           <SmtpCard />
+          <ResetStatsCard />
         </div>
       )}
     </div>
@@ -213,6 +219,9 @@ const Overview: React.FC = () => {
   const [stats, setStats] = useState<Stats | null>(null);
   const [motionStats, setMotionStats] = useState<MotionStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const dailyPage = usePaged(stats ? [...stats.daily].reverse() : null);
+  const motionPage = usePaged(motionStats?.recentJobs);
 
   useEffect(() => {
     setStats(null);
@@ -329,7 +338,7 @@ const Overview: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {[...stats.daily].reverse().map(d => (
+              {dailyPage.rows.map(d => (
                 <tr key={d.day} className="border-b border-slate-800/50 text-slate-200">
                   <td className={td}>{d.day}</td>
                   <td className={td}>{num(d.requests)}</td>
@@ -345,6 +354,7 @@ const Overview: React.FC = () => {
             </tbody>
           </table>
         </div>
+        {dailyPage.pager}
       </div>
 
       {/* Motion Graphics Stats */}
@@ -419,7 +429,7 @@ const Overview: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {motionStats.recentJobs.slice(0, 20).map(j => (
+                    {motionPage.rows.map(j => (
                       <tr key={j.jobId} className="border-b border-slate-800/50 text-slate-200">
                         <td className={td}>{date(j.createdAt)}</td>
                         <td className={`${td} max-w-[200px] truncate`} title={j.title}>{j.title || '—'}</td>
@@ -431,6 +441,7 @@ const Overview: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+              {motionPage.pager}
             </div>
           )}
         </>
@@ -447,6 +458,7 @@ const UsersTab: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsChange: (c
 }) => {
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const usersPage = usePaged(users);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -513,7 +525,7 @@ const UsersTab: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsChange: (c
               </tr>
             </thead>
             <tbody>
-              {users.map(u => {
+              {usersPage.rows.map(u => {
                 const isSelf = u.id === currentUser.id;
                 const isOpen = expandedId === u.id;
                 return (
@@ -570,6 +582,7 @@ const UsersTab: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsChange: (c
               )}
             </tbody>
           </table>
+          {usersPage.pager}
         </div>
       )}
     </div>
@@ -590,6 +603,7 @@ const UserManager: React.FC<{
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[] | null>(null);
+  const txPage = usePaged(transactions, 10);
 
   const loadTransactions = useCallback(() => {
     api<{ transactions: Transaction[] }>(`/api/admin/users/${user.id}/transactions`).then(d => setTransactions(d.transactions));
@@ -769,10 +783,10 @@ const UserManager: React.FC<{
 
       <div>
         <div className="text-xs font-bold text-white mb-2">حركة الرصيد</div>
-        <div className="max-h-56 overflow-y-auto border border-slate-800 rounded-lg">
+        <div className="border border-slate-800 rounded-lg overflow-x-auto">
           <table className="w-full text-[11px]">
             <tbody>
-              {transactions?.map(t => (
+              {txPage.rows.map(t => (
                 <tr key={t.id} className="border-b border-slate-800/50 text-slate-300">
                   <td className="px-2 py-1.5 whitespace-nowrap">{date(t.created_at)}</td>
                   <td className="px-2 py-1.5">{TX_LABELS[t.type]}</td>
@@ -790,6 +804,7 @@ const UserManager: React.FC<{
               )}
             </tbody>
           </table>
+          {txPage.pager}
         </div>
       </div>
     </div>
@@ -801,8 +816,9 @@ const UserManager: React.FC<{
 const UsageTab: React.FC = () => {
   const [rows, setRows] = useState<UsageEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const page = usePaged(rows);
 
-  const load = () => api<{ usage: UsageEvent[] }>('/api/admin/usage?limit=200').then(d => setRows(d.usage)).catch(e => setError(e.message));
+  const load = () => api<{ usage: UsageEvent[] }>('/api/admin/usage?limit=5000').then(d => setRows(d.usage)).catch(e => setError(e.message));
   useEffect(() => { load(); }, []);
 
   if (error) return <p className="text-rose-300 text-sm">{error}</p>;
@@ -819,7 +835,7 @@ const UsageTab: React.FC = () => {
           </tr>
         </thead>
         <tbody>
-          {rows.map(r => (
+          {page.rows.map(r => (
             <tr key={r.id} className="border-b border-slate-800/50 text-slate-200">
               <td className={td}>{date(r.created_at)}</td>
               <td className={`${td} text-slate-400`} dir="ltr">{r.email}</td>
@@ -839,6 +855,7 @@ const UsageTab: React.FC = () => {
           )}
         </tbody>
       </table>
+      {page.pager}
     </div>
   );
 };

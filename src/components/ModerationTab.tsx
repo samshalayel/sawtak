@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, X, ShieldAlert, BrainCircuit } from 'lucide-react';
 import { api, card, date, td, th } from './adminShared';
+import { usePaged } from './Pager';
 
 type Mode = 'block' | 'flag' | 'off';
 
@@ -23,6 +24,7 @@ const FEATURE_LABELS: Record<string, string> = {
 
 export const ModerationTab: React.FC = () => {
   const [data, setData] = useState<ModerationData | null>(null);
+  const eventsPage = usePaged(data?.events);
   const [newWords, setNewWords] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -160,7 +162,7 @@ export const ModerationTab: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {data.events.map(ev => (
+            {eventsPage.rows.map(ev => (
               <tr key={ev.id} className="border-b border-slate-800/50 text-slate-200 align-top">
                 <td className={td}>{date(ev.created_at)}</td>
                 <td className={`${td} text-slate-400`} dir="ltr">{ev.email ?? '—'}</td>
@@ -177,6 +179,7 @@ export const ModerationTab: React.FC = () => {
             )}
           </tbody>
         </table>
+        {eventsPage.pager}
       </div>
     </div>
   );

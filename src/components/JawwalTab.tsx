@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, RefreshCw, Wallet } from 'lucide-react';
 import { api, card, td, th } from './adminShared';
 import { JawwalPaymentsCard } from './JawwalPaymentsCard';
+import { usePaged } from './Pager';
 
 // Admin "Jawwal Pay" tab: the merchant wallet balance and the gateway's own transaction list (matched to our
 // payment log), so every shekel received can be traced to an account and a package.
@@ -25,6 +26,7 @@ export const JawwalTab: React.FC = () => {
   const [to, setTo] = useState(iso(new Date()));
   const [report, setReport] = useState<TxReport | null>(null);
   const [txErr, setTxErr] = useState<string | null>(null);
+  const txPage = usePaged(report?.txs);
   const [loadingTx, setLoadingTx] = useState(false);
 
   const loadBalance = () => {
@@ -101,7 +103,7 @@ export const JawwalTab: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {report.txs.map(t => (
+                    {txPage.rows.map(t => (
                       <tr key={t.reference} className={`border-b border-slate-800/50 text-slate-200 ${t.reversed ? 'opacity-50 line-through' : ''}`}>
                         <td className={`${td} text-slate-400`} dir="ltr">{t.date}</td>
                         <td className={`${td} font-mono`}>{t.reference}</td>
@@ -118,6 +120,7 @@ export const JawwalTab: React.FC = () => {
                     ))}
                   </tbody>
                 </table>
+                {txPage.pager}
               </div>
             )}
           </>

@@ -181,7 +181,7 @@ jawwalRouter.post('/pay', async (req: Request, res: Response) => {
 
 // Admins: every payment attempt, newest first, and whether the gateway is in test or live mode
 jawwalRouter.get('/payments', requireAdmin, (_req: Request, res: Response) => {
-  res.json({ success: true, mode: MODE, enabled: enabled(), payments: listJawwalPayments(100) });
+  res.json({ success: true, mode: MODE, enabled: enabled(), payments: listJawwalPayments(2000) });
 });
 
 // ── admin: merchant wallet and the gateway's own transaction list ─────────────

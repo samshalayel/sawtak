@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlaskConical, History, Loader2, StopCircle } from 'lucide-react';
 import { api, card, td, th } from './adminShared';
+import { usePaged } from './Pager';
 import { BenchmarkRun, Span, SpanProvider, spanMs } from '../types/spans';
 
 // Admin performance test: runs one real motion video (idea -> script -> voice -> worker) and shows every stage as a
@@ -154,6 +155,7 @@ export const BenchmarkTab: React.FC = () => {
   const [now, setNow] = useState<number | undefined>(undefined);
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [history, setHistory] = useState<BenchmarkRun[]>([]);
+  const historyPage = usePaged(history, 10);
   const [selected, setSelected] = useState<BenchmarkRun | null>(null);
   const cancelled = useRef(false);
 
@@ -327,7 +329,7 @@ export const BenchmarkTab: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {history.map(r => {
+                {historyPage.rows.map(r => {
                   const s = summarize(r.spans);
                   const t = timingsOf(r.spans);
                   return (
@@ -346,6 +348,7 @@ export const BenchmarkTab: React.FC = () => {
                 })}
               </tbody>
             </table>
+            {historyPage.pager}
           </div>
         )}
       </div>
