@@ -42,11 +42,25 @@ export const QuranShowcase: React.FC<{ price: number }> = ({ price }) => (
         </div>
       </div>
 
-      {/* A real reel made with the service */}
-      <figure className="mx-auto w-[230px] sm:w-[260px] space-y-2">
-        <div className="rounded-[2rem] bg-[#0b1220] p-2 shadow-2xl ring-1 ring-black/10">
-          <video src="/examples/quran-reel.mp4" poster="/examples/quran-reel.jpg" controls playsInline preload="none"
-            className="w-full aspect-[9/16] rounded-[1.6rem] bg-black object-cover" />
+      {/* A real reel made with the service, in a phone: silver edge, black bezel, notch and side buttons */}
+      <figure className="mx-auto w-[230px] sm:w-[260px] space-y-3">
+        <div className="relative" dir="ltr">
+          <span className="absolute -left-[3px] top-[17%] w-[3px] h-6 rounded-l-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
+          <span className="absolute -left-[3px] top-[25%] w-[3px] h-11 rounded-l-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
+          <span className="absolute -left-[3px] top-[34%] w-[3px] h-11 rounded-l-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
+          <span className="absolute -right-[3px] top-[28%] w-[3px] h-16 rounded-r-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
+          <div className="rounded-[2.7rem] p-[3px] bg-gradient-to-b from-[#e4e4e7] via-[#a1a1aa] to-[#d4d4d8] shadow-2xl">
+            <div className="rounded-[2.55rem] bg-[#000000] p-[10px]">
+              <div className="relative overflow-hidden rounded-[2rem] bg-[#000000]">
+                <video src="/examples/quran-reel.mp4" poster="/examples/quran-reel.jpg" controls playsInline preload="none"
+                  className="block w-full aspect-[9/16] object-cover" />
+                {/* Notch (small enough to leave the reciter's name at the top visible) */}
+                <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[38%] h-[15px] bg-[#000000] rounded-b-[10px] flex items-center justify-end pr-3">
+                  <span className="w-[6px] h-[6px] rounded-full bg-[#1e2638] ring-1 ring-[#334063]" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         <figcaption className="text-center text-[11px] text-slate-500">مثال حقيقي: سورة الأعراف 8–9 بصوت الشيخ محمد جبريل</figcaption>
       </figure>
