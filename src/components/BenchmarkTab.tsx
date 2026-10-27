@@ -15,15 +15,15 @@ type Timings = 'aws' | 'fast';
 /** The Claude model that wrote the plan or the free-style code (from its span). */
 const claudeModelOf = (spans: Span[]) => String(spans.find(s => s.provider === 'claude' && s.meta?.model)?.meta?.model ?? '');
 
-/** How the word timings were made (from the worker's spans) and how long that took. */
-function timingsOf(spans: Span[]): { label: string; ms: number } | null {
+/** How the word timings were made (from the worker's spans), how long that took, and a hint for the tooltip. */
+function timingsOf(spans: Span[]): { label: string; ms: number; hint?: string } | null {
   const fast = spans.find(s => s.name === 'timings-fast');
   if (fast) return { label: 'سريع', ms: spanMs(fast) };
   const aws = spans.find(s => s.name === 'transcribe');
   const whisper = spans.find(s => s.name === 'whisper');
   if (aws && !aws.error) return { label: 'AWS', ms: spanMs(aws) };
-  if (whisper) return { label: aws ? 'AWS ← whisper' : 'whisper', ms: spanMs(whisper) + (aws ? spanMs(aws) : 0) };
-  return aws ? { label: 'AWS (فشل)', ms: spanMs(aws) } : null;
+  if (whisper) return { label: 'whisper', ms: spanMs(whisper) + (aws ? spanMs(aws) : 0), hint: aws ? 'فشل AWS فاستُخدم whisper على السيرفر (المدة تشمل الاثنين)' : undefined };
+  return aws ? { label: 'AWS ✗', ms: spanMs(aws), hint: 'فشل AWS' } : null;
 }
 
 const LIMIT_MS: Record<Style, number> = { library: 15 * 60_000, free: 60 * 60_000 };
@@ -336,7 +336,8 @@ export const BenchmarkTab: React.FC = () => {
                       <td className={`${td} max-w-[16rem] truncate text-slate-200`}>{r.idea || '—'}</td>
                       <td className={td}>{r.status === 'done' ? <span className="text-emerald-400">✓ تم</span> : <span className="text-rose-400" title={r.error ?? ''}>✗ فشل</span>}</td>
                       <td className={`${td} text-violet-300`} dir="ltr">{claudeModelOf(r.spans).replace(/^claude-/, '') || '—'}</td>
-                      <td className={`${td} text-teal-300 whitespace-nowrap`}>{t ? `${t.label} · ${fmtMs(t.ms)}` : '—'}</td>
+                      {/* Each part isolated, or mixed Latin, Arabic and digits come out scrambled ("1 · AWSد 21ث") */}
+                      <td className={`${td} text-teal-300 whitespace-nowrap`} title={t?.hint}>{t ? <><bdi>{t.label}</bdi> · <bdi>{fmtMs(t.ms)}</bdi></> : '—'}</td>
                       <td className={`${td} tabular-nums`}>{fmtMs(r.totalMs)}</td>
                       <td className={`${td} tabular-nums text-amber-200`}>{fmtUsd(r.totalCostUsd)}</td>
                       <td className={`${td} text-slate-300`}>{s.slowest ? `${s.slowest.label} (${fmtMs(spanMs(s.slowest))})` : '—'}</td>
