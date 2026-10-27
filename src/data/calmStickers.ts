@@ -73,21 +73,25 @@ export interface CalmSticker {
 }
 
 /** Vertical layout of the sticker block (720x1280 design pixels): icon top, label area, date lines. */
-export function stickerLayout(position: 'top' | 'bottom', hasTitle: boolean, look = 'sticker', hasIcon = true) {
+export function stickerLayout(position: 'top' | 'bottom', hasTitle: boolean, look = 'sticker', hasIcon = true, hasInfo = false) {
+  // A line under the title (the reciter's name on Quran reels) pushes a top sticker down
+  const info = position === 'top' && hasInfo ? INFO_ROOM : 0;
   if (look === 'decor') {
     // Ornamented day-name artwork (public/days) fitted in a 460x250 box, the dates under it
-    const top = position === 'top' ? (hasTitle ? 210 : 100) : 740;
+    const top = (position === 'top' ? (hasTitle ? 210 : 100) : 740) + info;
     const artY = top + (hasIcon ? 70 : 0);
     return { iconY: top, iconSize: 60, labelY: artY, labelSize: 0, artW: 460, artH: 250, dateY: artY + 262, dateSize: 96, dateSize2: 90, dateGap: 104 };
   }
   if (look !== 'sticker') {
-    const top = position === 'top' ? (hasTitle ? 215 : 110) : 770;
+    const top = (position === 'top' ? (hasTitle ? 215 : 110) : 770) + info;
     // (Amiri's tall line box: glyphs sit ~0.27-0.7 of the size below the anchor)
     return { iconY: top, iconSize: 60, labelY: top - 30, labelSize: 340, artW: 0, artH: 0, dateY: top + 226, dateSize: 96, dateSize2: 90, dateGap: 104 };
   }
-  const top = position === 'top' ? (hasTitle ? 225 : 120) : 900;
+  const top = (position === 'top' ? (hasTitle ? 225 : 120) : 900) + info;
   return { iconY: top, iconSize: 68, labelY: top + 74, labelSize: 72, artW: 0, artH: 0, dateY: top + 168, dateSize: 36, dateSize2: 36, dateGap: 48 };
 }
+
+const INFO_ROOM = 60;
 
 /** Ornamented day-name artwork (white-on-transparent masks, coloured at render time), by Date.getDay(). */
 export const DAY_ART = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(k => `/days/${k}.png`);

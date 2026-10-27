@@ -31,6 +31,7 @@ const { newUploadPath, uploadPath, probeVideo, renderOverlayVideo, isOverlayFont
 const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
+const { QURAN_RECITERS } = await import('./src/data/quran.ts');
 const { serviceGate, serviceBlocked } = await import('./server/services.ts');
 const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines, backgroundApproved } = await import('./server/medical.ts');
 const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
@@ -1065,13 +1066,14 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   const body = req.body ?? {};
   let title = String(body.title || '').trim().slice(0, 60);
   const supportCard = String(body.supportCard || '').trim().slice(0, 200);
+  const dedication = String(body.dedication || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
   const quranPick = body.quran ? await parseQuranPick(body.quran).catch(() => ({ error: 'تعذّر قراءة السورة، حاول بعد قليل' })) : null;
   if (!quranPick) return res.status(400).json({ success: false, error: 'اختر الآيات أولاً' });
   if ('error' in quranPick) return res.status(400).json({ success: false, error: quranPick.error });
   if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
   const sticker = clampSticker(body.sticker);
-  if (!(await passesModeration(req, res, [title, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
+  if (!(await passesModeration(req, res, [title, supportCard, dedication, sticker?.label ?? ''].join('\n'), 'video'))) return;
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
@@ -1087,6 +1089,9 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   }
   const text = recitation.captions.map(c => c.text).join(' ');
   if (!title) title = recitation.title;
+  // The reciter's name under the title (unless the customer turned it off)
+  const reciterName = QURAN_RECITERS.find(r => r.id === quranPick.reciter)?.name;
+  const info = body.showReciter !== false && reciterName ? `بصوت الشيخ ${reciterName}` : '';
   try {
     chargePoints(req.user!.id, getSettings().costQuranReel, `ريل آيات · ${recitation.title}`);
   } catch (err) {
@@ -1098,7 +1103,7 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
   startCalmRender(job, {
-    clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+    clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, info, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
   });
   res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
 });
@@ -1108,13 +1113,14 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   const text = String(body.text || '').trim().slice(0, 1200);
   const title = String(body.title || '').trim().slice(0, 60);
   const supportCard = String(body.supportCard || '').trim().slice(0, 200);
+  const dedication = String(body.dedication || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Sulafat';
   const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
   const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
   if (!text) return res.status(400).json({ success: false, error: 'اكتب نص الريل أو اختر قالباً' });
   if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
   const sticker = clampSticker(body.sticker);
-  if (!(await passesModeration(req, res, [title, text, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
+  if (!(await passesModeration(req, res, [title, text, supportCard, dedication, sticker?.label ?? ''].join('\n'), 'video'))) return;
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
@@ -1157,7 +1163,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
   startCalmRender(job, {
-    clips: clips as any, voice: wav, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+    clips: clips as any, voice: wav, text, title, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
   });
   res.status(202).json({ success: true, jobId: job.id, balance });
 });

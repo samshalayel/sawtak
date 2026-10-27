@@ -114,6 +114,10 @@ export interface CalmRenderOptions {
   /** Quran reels: one entry per verse with its exact span in `voice` (seconds); replaces the timing guessed from text. */
   verses?: { text: string; start: number; end: number }[];
   title: string;          // optional line at the top
+  /** Optional smaller line under the title (Quran reels: the reciter's name). */
+  info?: string;
+  /** Optional text shown for the whole reel, e.g. a dedication ("عن روح ..."). */
+  dedication?: string;
   /** Medical reels: the doctor's identity (logo, name, specialty, contact) along the bottom for the whole reel. */
   brand?: { logo: Buffer | null; lines: string[]; color: string };
   supportCard: string;    // optional closing card text (empty = none)
@@ -124,9 +128,12 @@ export interface CalmRenderOptions {
   onStart?: () => void;
 }
 
-/** Customer text look, in 720x1280 design pixels: font, colour, caption size and the captions' vertical centre. */
-export interface CalmStyle { font: string; color: string; size: number; y: number; titleSize: number }
-export const DEFAULT_CALM_STYLE: CalmStyle = { font: 'naskh', color: '#ffffff', size: 88, y: 840, titleSize: 58 };
+/**
+ * Customer text look, in 720x1280 design pixels: font, colour, caption size and the captions' vertical centre; the
+ * title's top, and the vertical centres of the line under it and of the dedication (all dragged on the preview).
+ */
+export interface CalmStyle { font: string; color: string; size: number; y: number; titleSize: number; titleY: number; infoY: number; dedicationY: number }
+export const DEFAULT_CALM_STYLE: CalmStyle = { font: 'naskh', color: '#ffffff', size: 88, y: 840, titleSize: 58, titleY: 140, infoY: 262, dedicationY: 1120 };
 
 export function clampCalmStyle(raw: any): CalmStyle {
   if (!raw || typeof raw !== 'object') return DEFAULT_CALM_STYLE;
@@ -140,6 +147,9 @@ export function clampCalmStyle(raw: any): CalmStyle {
     size: num(raw.size, 48, 130, DEFAULT_CALM_STYLE.size),
     y: num(raw.y, 220, 1120, DEFAULT_CALM_STYLE.y),
     titleSize: num(raw.titleSize, 36, 100, DEFAULT_CALM_STYLE.titleSize),
+    titleY: num(raw.titleY, 40, 1160, DEFAULT_CALM_STYLE.titleY),
+    infoY: num(raw.infoY, 60, 1200, DEFAULT_CALM_STYLE.infoY),
+    dedicationY: num(raw.dedicationY, 60, 1200, DEFAULT_CALM_STYLE.dedicationY),
   };
 }
 
@@ -259,7 +269,7 @@ function spreadOverSpeech(chunks: string[], speech: [number, number][], offset: 
 
 /** Sticker text and watermark (Noto and Amiri, which libass shapes well); captions are PNG overlays. */
 function buildAss(o: CalmRenderOptions, total: number) {
-  const lay = stickerLayout(o.sticker?.position ?? 'top', !!o.title, o.sticker?.look, (o.sticker?.icon ?? 'none') !== 'none');
+  const lay = stickerLayout(o.sticker?.position ?? 'top', !!o.title, o.sticker?.look, (o.sticker?.icon ?? 'none') !== 'none', !!o.info);
   const theme = STICKER_THEMES.find(t => t.id === o.sticker?.theme) ?? STICKER_THEMES[0];
   const look = STICKER_LOOKS.find(l => l.id === o.sticker?.look) ?? STICKER_LOOKS[0];
   const callig = look.id !== 'sticker';
@@ -287,18 +297,21 @@ function buildAss(o: CalmRenderOptions, total: number) {
 }
 
 /**
- * Title, captions and support card as timed PNG overlays drawn with Pango (see calm-text.ts): the customer's font
+ * Title (and the line under it), captions, dedication and support card as timed PNG overlays drawn with Pango (see calm-text.ts): the customer's font
  * and colour, captions centred on style.y, each one fading in and out with the voice.
  */
 async function textOverlays(o: CalmRenderOptions, voiceStart: number, voiceEnd: number, total: number) {
-  const st = o.style ?? DEFAULT_CALM_STYLE;
+  const st = { ...DEFAULT_CALM_STYLE, ...o.style };
   const out: { png: Buffer; x: number; y: number; start: number; end: number; fade: number }[] = [];
   const centred = async (text: string, size: number, width: number, cy: number | null, top: number, start: number, end: number, fade: number) => {
     const t = await textPng(text, { font: st.font, size, color: st.color, width });
     const y = cy == null ? top - t.pad : Math.round(cy - t.height / 2);
     out.push({ png: t.png, x: Math.round((W - t.width) / 2), y: Math.max(0, y), start, end, fade });
   };
-  if (o.title) await centred(o.title, st.titleSize, W - 120, null, 140, 0.6, voiceEnd, 0.9);
+  if (o.title) await centred(o.title, st.titleSize, W - 120, null, st.titleY, 0.6, voiceEnd, 0.9);
+  if (o.info) await centred(o.info, Math.round(st.titleSize * 0.62), W - 120, st.infoY, 0, 0.8, voiceEnd, 0.9);
+  // The dedication stays for the whole reel, the closing card included
+  if (o.dedication) await centred(o.dedication, Math.round(st.size * 0.52), W - 120, st.dedicationY, 0, 0.6, total - 0.3, 0.9);
   for (const c of o.verses?.length ? verseCaptions(o.verses, o.voice, voiceStart) : timeCaptions(o.text, o.voice, voiceStart)) {
     await centred(c.text, st.size, W - 110, st.y, 0, c.start, Math.min(c.end, voiceEnd + 0.4), 0.35);
   }
@@ -361,7 +374,7 @@ async function renderNow(o: CalmRenderOptions): Promise<Buffer> {
     // are laid over the scenes as still images that fade in
     const sk = o.sticker;
     const icon = sk && STICKER_ICONS.find(i => i.id === sk.icon);
-    const lay = stickerLayout(sk?.position ?? 'top', !!o.title, sk?.look, !!icon);
+    const lay = stickerLayout(sk?.position ?? 'top', !!o.title, sk?.look, !!icon, !!o.info);
     // Every still overlay (sticker pictures, then the Pango-drawn title/captions/card) is a looped PNG that starts
     // at its own time, fades in (and out, for text) and drops away when it ends
     const pictures: { file: string; x: number; y: number; start: number; end: number; fade: number; fadeOut: boolean }[] = [];
