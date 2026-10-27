@@ -27,6 +27,8 @@ export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'quran' | 'm
 export interface PublicConfig {
   /** Service switches from the admin settings (missing = on). Stopped services are hidden from customers. */
   services?: Partial<Record<ServiceId, boolean>>;
+  /** "نسخة تجريبية" ribbon on every page (admin switch). */
+  betaRibbon?: boolean;
   signupBonusCredits: number;
   maxTextChars: number;
   contactWhatsapp: string;

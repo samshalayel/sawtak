@@ -298,6 +298,7 @@ authRouter.get('/me', (req, res) => {
       prices: { voicePerMinute: s.costTtsPerMinute, greeting: s.costGreeting, calmReel: s.costCalmReel, quranReel: s.costQuranReel, motionLibrary: s.costMotionLibrary, motionFree: s.costMotionFree, medicalCard: s.costMedicalCard, medicalReel: s.costMedicalReel },
       // Which services are on (stopped ones are hidden; admins still see and use them)
       services: serviceStatus(),
+      betaRibbon: s.betaRibbon !== 0,
     },
   });
 });

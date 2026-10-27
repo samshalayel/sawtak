@@ -29,6 +29,8 @@ interface HeaderProps {
   /** Admins only: browse the site as a customer sees it (stopped services hidden). */
   viewAsCustomer?: boolean;
   onToggleViewAsCustomer?: () => void;
+  /** Keeps the top-left corner free for the "نسخة تجريبية" ribbon. */
+  cornerRibbon?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   motionOn = true,
   viewAsCustomer = false,
   onToggleViewAsCustomer,
+  cornerRibbon = false,
 }) => {
   const offerActive = isOfferActive();
   const [showGuide, setShowGuide] = useState(false);
@@ -54,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-8 py-3.5">
+      <header className={`border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40 ${cornerRibbon ? 'pl-[72px] pr-4 sm:pl-28 sm:pr-8' : 'px-4 sm:px-8'} py-3.5`}>
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Logo & Identity */}
           <div className="flex items-center gap-3">

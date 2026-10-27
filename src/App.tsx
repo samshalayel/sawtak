@@ -15,6 +15,7 @@ import { PressPage } from './components/PressPage';
 import { CalmPage } from './components/CalmPage';
 import { MedicalPage } from './components/MedicalPage';
 import { QuranShowcase } from './components/QuranShowcase';
+import { BetaRibbon } from './components/BetaRibbon';
 import { MotionTab } from './components/MotionTab';
 import { MobileAppNav } from './components/MobileAppNav';
 import { PartyPopper, Newspaper, Leaf, Stethoscope, BookOpen } from 'lucide-react';
@@ -690,6 +691,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/20 selection:text-amber-200">
       <Header
+        cornerRibbon={!!config.betaRibbon}
         onReset={handleResetSession}
         user={user}
         view={isAdminView ? 'admin' : view === 'motion' ? 'motion' : 'studio'}
@@ -1125,6 +1127,7 @@ export default function App() {
       </footer>
 
       {/* Phones only: app-style bottom bar and "install the app" suggestion */}
+      {config.betaRibbon && <BetaRibbon />}
       <MobileAppNav view={view} studioHash="#/studio" onPackages={() => setShowPackages(true)} isOn={id => serviceOn(id)} studioOn={studioOn} />
     </div>
   );

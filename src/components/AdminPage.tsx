@@ -125,6 +125,7 @@ interface AppSettings {
   servicePress: number;
   servicePayments: number;
   serviceMedical: number;
+  betaRibbon: number;
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -895,7 +896,7 @@ const SettingsTab: React.FC = () => {
     setMessage(null);
     try {
       // Only this form's fields: the SMTP card saves its own values separately
-      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key), ...SERVICE_SWITCHES.map(f => f.key)].map(k => [k, settings[k as keyof AppSettings]]));
+      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key), ...SERVICE_SWITCHES.map(f => f.key), 'betaRibbon'].map(k => [k, settings[k as keyof AppSettings]]));
       const d = await api<{ settings: AppSettings }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(own) });
       setSettings(d.settings);
       setMessage('تم حفظ الإعدادات');
@@ -952,6 +953,13 @@ const SettingsTab: React.FC = () => {
             );
           })}
         </div>
+        <label className="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer border-t border-slate-700">
+          <span className="text-sm text-slate-200">🧪 شريط «نسخة تجريبية» على زاوية الموقع</span>
+          <span className="flex items-center gap-2">
+            <span className={`text-[11px] font-bold ${settings.betaRibbon !== 0 ? 'text-emerald-400' : 'text-slate-500'}`}>{settings.betaRibbon !== 0 ? 'ظاهر' : 'مخفي'}</span>
+            <input type="checkbox" checked={settings.betaRibbon !== 0} onChange={e => setSettings({ ...settings, betaRibbon: e.target.checked ? 1 : 0 })} className="w-5 h-5 accent-emerald-500" />
+          </span>
+        </label>
       </div>
 
       {/* Service pricing table */}
