@@ -32,7 +32,8 @@ const { createWriteStream } = await import('fs');
 const { calmRouter, renderCalmReel, vettedClip, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { QURAN_RECITERS } = await import('./src/data/quran.ts');
-const { logQuranReel, finishQuranReel } = await import('./server/quran-stats.ts');
+const { logQuranReel, finishQuranReel, refundQuranReel, recoverInterruptedQuranReels } = await import('./server/quran-stats.ts');
+recoverInterruptedQuranReels();
 const { serviceGate, serviceBlocked } = await import('./server/services.ts');
 const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines, backgroundApproved } = await import('./server/medical.ts');
 const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
@@ -1120,7 +1121,11 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   videoJobs.set(job.id, job);
   startCalmRender(job, {
     clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, info, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
-  }, (ok, renderSeconds, error) => finishQuranReel(logId, ok, renderSeconds, error));
+  }, (ok, renderSeconds, error) => {
+    finishQuranReel(logId, ok, renderSeconds, error);
+    // Nothing to show for the points: they go back to the user
+    if (!ok && refundQuranReel(logId) != null) job.error = `${job.error ?? 'تعذّر تجهيز الفيديو.'} أعدنا نقاط الريل إلى رصيدك.`;
+  });
   res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
 });
 
@@ -1233,13 +1238,13 @@ function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCa
     if (job.reelSeconds && took > 1) renderPace = Math.min(6, Math.max(0.5, renderPace * 0.7 + (took / job.reelSeconds) * 0.3));
     onDone?.(true, took);
   }).catch(error => {
-    onDone?.(false, job.startedAt ? (Date.now() - job.startedAt) / 1000 : 0, String(error?.message || error));
-    job.status = 'error';
     if (error instanceof RenderBusyError) job.error = 'هناك فيديوهات أخرى قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.';
     else {
       console.error('Calm reel failed:', error);
       job.error = 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.';
     }
+    onDone?.(false, job.startedAt ? (Date.now() - job.startedAt) / 1000 : 0, String(error?.message || error));
+    job.status = 'error';
   });
 }
 

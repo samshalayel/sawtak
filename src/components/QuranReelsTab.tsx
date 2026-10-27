@@ -9,10 +9,10 @@ import { usePaged } from './Pager';
 interface QuranReel {
   id: number; email: string | null; surah: number; surah_name: string; start_verse: number; end_verse: number;
   reciter: string; reel_seconds: number; points: number; status: 'rendering' | 'done' | 'failed';
-  render_seconds: number | null; error: string | null; created_at: string;
+  render_seconds: number | null; error: string | null; refunded: number; created_at: string;
 }
 interface QuranStats {
-  totals: { reels: number; done: number | null; failed: number | null; users: number; verses: number; reel_seconds: number; points: number; avg_render_seconds: number | null };
+  totals: { reels: number; done: number | null; failed: number | null; users: number; verses: number; reel_seconds: number; points: number; refunded: number | null; avg_render_seconds: number | null };
   byReciter: { name: string; reels: number }[];
   bySurah: { surah: number; name: string; reels: number }[];
   daily: { day: string; reels: number; points: number }[];
@@ -48,7 +48,7 @@ export const QuranReelsTab: React.FC = () => {
     { label: 'مستخدمون صنعوا ريلز', value: num(t.users), hint: t.users ? `${(t.reels / t.users).toFixed(1)} ريل للمستخدم` : '—' },
     { label: 'آيات', value: num(t.verses), hint: t.reels ? `${(t.verses / t.reels).toFixed(1)} آية للريل` : '—' },
     { label: 'مدة التلاوات', value: minutes(t.reel_seconds), hint: t.reels ? `${minutes(t.reel_seconds / t.reels)} للريل` : '—' },
-    { label: 'نقاط مستخدمة', value: num(t.points), hint: 'خُصمت من المستخدمين على ريلز الآيات' },
+    { label: 'نقاط مستخدمة', value: num(t.points), hint: t.refunded ? `بعد إعادة نقاط ${num(t.refunded)} ريل لم يكتمل` : 'خُصمت من المستخدمين على ريلز الآيات' },
     { label: 'نقاط متبقية عند المستخدمين', value: num(data.customers.points), hint: `رصيد ${num(data.customers.users)} مستخدم (بدون الأدمن)` },
     { label: 'متوسط وقت التجهيز', value: t.avg_render_seconds != null ? minutes(t.avg_render_seconds) : '—', hint: 'من الضغط على الزر إلى الفيديو' },
   ] : [];
@@ -131,7 +131,7 @@ export const QuranReelsTab: React.FC = () => {
                     <td className={td}>{r.reciter}</td>
                     <td className={td}>{minutes(r.reel_seconds)}</td>
                     <td className={td}>{num(r.points)}</td>
-                    <td className={`${td} ${STATUS[r.status].cls}`} title={r.error ?? undefined}>{STATUS[r.status].label}</td>
+                    <td className={`${td} ${STATUS[r.status].cls}`} title={r.error ?? undefined}>{STATUS[r.status].label}{r.refunded ? ' · أُعيدت النقاط' : ''}</td>
                     <td className={td}>{r.render_seconds != null ? minutes(r.render_seconds) : '—'}</td>
                   </tr>
                 ))}

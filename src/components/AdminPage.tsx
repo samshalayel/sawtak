@@ -789,7 +789,7 @@ const UserManager: React.FC<{
               {txPage.rows.map(t => (
                 <tr key={t.id} className="border-b border-slate-800/50 text-slate-300">
                   <td className="px-2 py-1.5 whitespace-nowrap">{date(t.created_at)}</td>
-                  <td className="px-2 py-1.5">{TX_LABELS[t.type]}</td>
+                  <td className="px-2 py-1.5">{t.type === 'charge' && t.delta > 0 ? 'استرجاع' : TX_LABELS[t.type]}</td>
                   <td className={`px-2 py-1.5 font-mono ${t.delta > 0 ? 'text-emerald-300' : 'text-rose-300'}`} dir="ltr">
                     {pointsDelta(t.delta)}
                   </td>

@@ -143,6 +143,23 @@ export function chargePoints(userId: number, points: number, note: string): numb
 }
 
 /**
+ * Gives back points charged by chargePoints when the service could not deliver (e.g. a Quran reel that failed to
+ * render). Logged as a positive 'charge' line, which the admin shows as «استرجاع».
+ */
+export function refundPoints(userId: number, points: number, note: string): number {
+  const seconds = pointsCredits(points);
+  return transaction(() => {
+    const row = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId) as { credits: number } | undefined;
+    if (!row) return 0;
+    db.prepare('UPDATE users SET credits = credits + ? WHERE id = ?').run(seconds, userId);
+    const after = row.credits + seconds;
+    db.prepare("INSERT INTO credit_transactions (user_id, delta, balance_after, type, note) VALUES (?, ?, ?, 'charge', ?)")
+      .run(userId, seconds, after, note);
+    return secondsToPoints(after);
+  });
+}
+
+/**
  * Points bought through Jawwal Pay: the balance, the ledger line and the payment row change together or not at all.
  * (No admin is involved, so admin_id stays empty; 0 would break the users foreign key.)
  */
