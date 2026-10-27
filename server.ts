@@ -619,6 +619,10 @@ interface VideoJob {
   createdAt: number;
   result?: Buffer;
   error?: string;
+  /** Reels: length of the video (s), the render time expected for it (s) and when its render started (ms). */
+  reelSeconds?: number;
+  estimate?: number;
+  startedAt?: number;
 }
 
 // In-memory jobs; finished videos are kept 15 minutes for download, then dropped
@@ -1174,16 +1178,52 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   res.status(202).json({ success: true, jobId: job.id, balance });
 });
 
+// Time left for a reel (shown to the customer): every reel's render time is expected from its length and the pace of
+// this server, learnt from the reels it finished (render seconds per second of video; 74 s for a 48 s reel when
+// measured). Other videos in the shared line count as a minute each.
+let renderPace = 1.6;
+const OTHER_VIDEO_SECONDS = 60;
+
+function remainingSeconds(j: VideoJob) {
+  const estimate = j.estimate ?? OTHER_VIDEO_SECONDS;
+  if (j.status !== 'rendering') return estimate;
+  const ran = (Date.now() - (j.startedAt ?? Date.now())) / 1000;
+  // Once ffmpeg reports progress, its own speed is the better guide
+  return Math.max(2, j.progress > 0.05 ? ran * (1 - j.progress) / j.progress : estimate - ran);
+}
+
+/** Seconds until `job` is ready: the renders before it shared over the render slots, then its own. */
+function etaSeconds(job: VideoJob) {
+  if (job.status === 'done' || job.status === 'error') return 0;
+  if (job.status === 'rendering') return remainingSeconds(job);
+  const jobs = [...videoJobs.values()];
+  const before = [
+    ...jobs.filter(j => j.status === 'rendering'),
+    ...jobs.filter(j => j.status === 'queued' && j.createdAt < job.createdAt).sort((a, b) => a.createdAt - b.createdAt),
+  ];
+  const lanes = new Array(RENDER_SLOTS).fill(0);
+  for (const j of before) {
+    const free = lanes.indexOf(Math.min(...lanes));
+    lanes[free] += remainingSeconds(j);
+  }
+  return Math.min(...lanes) + remainingSeconds(job);
+}
+
 /** Queues a calm reel and follows it on the job (both the AI-voice and the Quran reel). */
 function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCalmReel>[0], 'onStart' | 'onProgress'>) {
+  // Length of the reel: the voice, a breath before it and the ending (longer with a support card)
+  job.reelSeconds = pcmSeconds(options.voice) + (options.supportCard ? 5.7 : 3);
+  job.estimate = job.reelSeconds * renderPace;
   renderCalmReel({
     ...options,
-    onStart: () => { job.status = 'rendering'; },
+    onStart: () => { job.status = 'rendering'; job.startedAt = Date.now(); },
     onProgress: f => { job.progress = f; },
   }).then(mp4 => {
     job.status = 'done';
     job.progress = 1;
     job.result = mp4;
+    const took = (Date.now() - (job.startedAt ?? Date.now())) / 1000;
+    if (job.reelSeconds && took > 1) renderPace = Math.min(6, Math.max(0.5, renderPace * 0.7 + (took / job.reelSeconds) * 0.3));
   }).catch(error => {
     job.status = 'error';
     if (error instanceof RenderBusyError) job.error = 'هناك فيديوهات أخرى قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.';
@@ -1201,7 +1241,7 @@ app.get('/api/video/jobs/:id', requireAuth, (req, res) => {
   const jobs = [...videoJobs.values()];
   const ahead = job.status !== 'queued' ? 0 : jobs.filter(j => j.status === 'queued' && j.createdAt < job.createdAt).length
     + (jobs.filter(j => j.status === 'rendering').length >= RENDER_SLOTS ? 1 : 0);
-  res.json({ success: true, status: job.status, progress: job.progress, ahead, error: job.error });
+  res.json({ success: true, status: job.status, progress: job.progress, ahead, eta: Math.round(etaSeconds(job)), error: job.error });
 });
 
 app.get('/api/video/jobs/:id/file', requireAuth, (req, res) => {

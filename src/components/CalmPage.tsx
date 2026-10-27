@@ -9,6 +9,7 @@ import { CALM_FONTS, CalmFont, calmFont } from '../data/calmFonts';
 import { DAY_ART, DECOR_GRADIENT, STICKER_ICONS, STICKER_LOOKS, STICKER_THEMES, stickerLayout, vowelled } from '../data/calmStickers';
 import { DEFAULT_RECITER, QURAN_RECITERS } from '../data/quran';
 import { QuranChoice, QuranPicker } from './QuranPicker';
+import { RenderProgress } from './RenderProgress';
 
 // "Calm reels": gentle vertical videos — real nature scenes, a slow calm voice and large captions — for people
 // going through hard times. Texts stay modest (a quiet moment, not a treatment); scenes are filtered on the server.
@@ -169,9 +170,13 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   const [showReciter, setShowReciter] = useState(true);
   const [support, setSupport] = useState(DEFAULT_SUPPORT);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  // Reels waiting in the shared render line before this one (0 once it starts)
-  const [ahead, setAhead] = useState(0);
+  // While a reel is made: the job's state from the server, and the pop-up's percentage and time left. The percentage
+  // is time spent over (time spent + time left), so it moves steadily from the click to the finished reel.
+  const [renderJob, setRenderJob] = useState<{ status: 'starting' | 'queued' | 'rendering'; progress: number; ahead: number }>({ status: 'starting', progress: 0, ahead: 0 });
+  const [percent, setPercent] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const clickedAt = useRef(0);
+  const lastEta = useRef<{ eta: number; at: number } | null>(null);
   const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
   const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -223,6 +228,21 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     document.head.appendChild(link);
   }, []);
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.url); }, [result]);
+  useEffect(() => {
+    if (!busy) return;
+    const tick = () => {
+      const now = Date.now();
+      const spent = (now - clickedAt.current) / 1000;
+      const left = lastEta.current ? Math.max(1, lastEta.current.eta - (now - lastEta.current.at) / 1000) : null;
+      // Before the server's first estimate (voice or recitation being prepared) the ring creeps up to 8%
+      const value = left != null ? (spent / (spent + left)) * 100 : Math.min(8, spent * 0.8);
+      setPercent(p => Math.max(p, Math.min(99, value)));
+      setSecondsLeft(left);
+    };
+    tick();
+    const timer = setInterval(tick, 500);
+    return () => clearInterval(timer);
+  }, [busy]);
 
   // Scenes come from our server (it holds the key and filters anything distressing)
   useEffect(() => {
@@ -261,9 +281,12 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     if (quranMode && !quran) return setError({ text: 'اختر الآيات أولاً' });
     if (!quranMode && !text.trim()) return setError({ text: 'اكتب نص الريل أو اختر قالباً' });
     if (chosen.length === 0) return setError({ text: 'اختر مشهداً واحداً على الأقل (حتى ثلاثة)' });
+    clickedAt.current = Date.now();
+    lastEta.current = null;
+    setRenderJob({ status: 'starting', progress: 0, ahead: 0 });
+    setPercent(0);
+    setSecondsLeft(null);
     setBusy(true);
-    setProgress(0);
-    setAhead(0);
     if (result) URL.revokeObjectURL(result.url);
     setResult(null);
     try {
@@ -283,9 +306,10 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         await new Promise(r => setTimeout(r, 1500));
         const s = await fetch(`/api/video/jobs/${job.jobId}`).then(r => r.json()).catch(() => ({}));
         if (s.status === 'error' || s.success === false) throw new Error(s.error || 'تعذّر تجهيز الريل');
-        setProgress(Math.round((s.progress || 0) * 100));
-        setAhead(s.status === 'queued' ? s.ahead || 0 : 0);
+        if (typeof s.eta === 'number') lastEta.current = { eta: s.eta, at: Date.now() };
+        if (s.status === 'queued' || s.status === 'rendering') setRenderJob({ status: s.status, progress: s.progress || 0, ahead: s.ahead || 0 });
         if (s.status === 'done') {
+          setPercent(100);
           const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
           if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
           const blob = await file.blob();
@@ -646,10 +670,18 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         </div>
       )}
       {busy && (
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-slate-300"><span>{ahead > 0 ? `في الدور، قبلك ${ahead} ${ahead === 1 ? 'ريل' : 'ريلز'}… لا تغلق الصفحة` : progress === 0 ? (quranMode ? 'نجهّز التلاوة والمشاهد…' : 'نسجّل الصوت ونحضّر المشاهد…') : 'نجهّز الريل…'}</span><span className="font-mono text-emerald-300">{progress}%</span></div>
-          <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-gradient-to-l from-emerald-400 to-emerald-600 transition-all duration-700" style={{ width: `${Math.max(3, progress)}%` }} /></div>
-        </div>
+        <RenderProgress
+          title={quranMode ? 'نجهّز ريل الآيات' : 'نجهّز ريل السكينة'}
+          percent={percent}
+          secondsLeft={secondsLeft}
+          stage={
+            renderJob.status === 'starting' ? (quranMode ? 'نجهّز التلاوة…' : 'نسجّل الصوت بنبرة هادئة…')
+              // The line is mentioned only when the wait is long (over 4 minutes)
+              : renderJob.status === 'queued' && renderJob.ahead > 0 && (secondsLeft ?? 0) > 240 ? `في الدور، قبلك ${renderJob.ahead} ${renderJob.ahead === 1 ? 'ريل' : renderJob.ahead <= 10 ? 'ريلز' : 'ريل'}`
+              : renderJob.status === 'queued' ? 'نحضّر المشاهد…'
+              : renderJob.progress < 0.95 ? 'نركّب المشاهد والكلام…' : 'اللمسات الأخيرة…'
+          }
+        />
       )}
       <button type="button" onClick={create} disabled={busy} className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-base disabled:opacity-60">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />} اصنع الريل
