@@ -103,6 +103,8 @@ export default function App() {
   });
   // A stopped service is hidden from customers; admins keep using it to test (the server enforces the same rule)
   const serviceOn = (id: ServiceId) => (user?.role === 'admin' && !viewAsCustomer) || config.services?.[id] !== false;
+  // The voice studio (editor and generate button) shows while single voice or dialogue is on
+  const studioOn = serviceOn('tts') || serviceOn('dialogue');
   const [showPackages, setShowPackages] = useState(false);
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
@@ -482,14 +484,14 @@ export default function App() {
   // Keyboard shortcut: Cmd/Ctrl + Enter generates on the last step
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && step === 4) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && step === 4 && studioOn) {
         e.preventDefault();
         handleGenerate();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [step, user, mode, text, dialogueScript, speakers, voiceId, language, dialect, toneStyle, customStylePrompt, speed, pitch]);
+  }, [step, user, mode, text, dialogueScript, speakers, voiceId, language, dialect, toneStyle, customStylePrompt, speed, pitch, studioOn]);
 
   const isAdminView = view === 'admin' && user?.role === 'admin';
   // Mirrors the server's reservation: dialogues get ~10% extra for turn-taking pauses
@@ -817,6 +819,7 @@ export default function App() {
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
         </div>
 
+        {studioOn && (<>
         {/* Mode: single voice vs two-speaker dialogue */}
         <div className="grid grid-cols-2 gap-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-1.5">
           {([
@@ -1060,6 +1063,7 @@ export default function App() {
         </div>
         </>
         )}
+        </>)}
       </main>
       )}
 
