@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Gift, Leaf, Mic, Newspaper, PartyPopper, Share, X } from 'lucide-react';
+import { Download, Gift, Home, Leaf, Mic, Newspaper, PartyPopper, Share, X } from 'lucide-react';
 
 // Phone-only app chrome: a bottom tab bar like native apps, and an "install the app" suggestion
 // (Android: the browser's install prompt; iPhone: how to add it to the home screen).
@@ -10,6 +10,8 @@ interface Props {
   /** Hides the tabs of stopped services. */
   isOn?: (id: 'tts' | 'greetings' | 'press' | 'calm') => boolean;
   studioHash: string;       // '#/' on the classic site, '#/studio' on the redesign
+  /** False when the voice studio is stopped: the first tab is then the home page (the service cards). */
+  studioOn?: boolean;
   onPackages: () => void;
 }
 
@@ -20,7 +22,7 @@ const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
 const isIos = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages, isOn = () => true }) => {
+export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages, isOn = () => true, studioOn = true }) => {
   const [deferred, setDeferred] = useState<any>(null);
   const [showInstall, setShowInstall] = useState(false);
   const [iosHelp, setIosHelp] = useState(false);
@@ -66,7 +68,7 @@ export const MobileAppNav: React.FC<Props> = ({ view, studioHash, onPackages, is
   };
 
   const tabs = [
-    { id: 'studio', label: 'الاستوديو', icon: Mic, href: studioHash, active: view === 'studio' || view === 'home' },
+    { id: 'studio', label: studioOn ? 'الاستوديو' : 'الرئيسية', icon: studioOn ? Mic : Home, href: studioHash, active: view === 'studio' || view === 'home' },
     { id: 'greetings', label: 'التهاني', icon: PartyPopper, href: '#/greetings', active: view === 'greetings' },
     { id: 'press', label: 'الصحفيين', icon: Newspaper, href: '#/press', active: view === 'press' },
     { id: 'calm', label: 'السكينة', icon: Leaf, href: '#/calm', active: view === 'calm' },

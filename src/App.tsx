@@ -14,6 +14,7 @@ import { GreetingsPage } from './components/GreetingsPage';
 import { PressPage } from './components/PressPage';
 import { CalmPage } from './components/CalmPage';
 import { MedicalPage } from './components/MedicalPage';
+import { QuranShowcase } from './components/QuranShowcase';
 import { MotionTab } from './components/MotionTab';
 import { MobileAppNav } from './components/MobileAppNav';
 import { PartyPopper, Newspaper, Leaf, Stethoscope, BookOpen } from 'lucide-react';
@@ -105,6 +106,8 @@ export default function App() {
   const serviceOn = (id: ServiceId) => (user?.role === 'admin' && !viewAsCustomer) || config.services?.[id] !== false;
   // The voice studio (editor and generate button) shows while single voice or dialogue is on
   const studioOn = serviceOn('tts') || serviceOn('dialogue');
+  // Without the studio, Quran reels lead the home page (a large showcase with a real reel instead of a small card)
+  const quranShowcase = !studioOn && serviceOn('quran');
   const [showPackages, setShowPackages] = useState(false);
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
@@ -793,7 +796,7 @@ export default function App() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <TermsPage />
       </main>
-      ) : view === 'home' && !user ? (
+      ) : view === 'home' && !user && studioOn ? (
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6">
         <LandingPage
           isLoggedIn={Boolean(user)}
@@ -805,6 +808,7 @@ export default function App() {
       </main>
       ) : (
       <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {quranShowcase && <QuranShowcase price={(config.prices ?? DEFAULT_PRICES).quranReel} />}
         {/* Entries to the other services (white cards, each framed in its own colour) */}
         <div className="grid lg:grid-cols-2 gap-3">
           {serviceOn('greetings') && <HomeEntry href="#/greetings" icon={PartyPopper} color="#c026d3" cta="جرّبها"
@@ -813,7 +817,7 @@ export default function App() {
             title="استوديو الصحفيين" text="حوّل مقالك إلى بودكاست أو نشرة أخبار أو ملخص مسموع، بفيديو بهوية مؤسستك" />}
           {serviceOn('calm') && <HomeEntry href="#/calm" icon={Leaf} color="#059669" cta="جرّبها"
             title="ريلز السكينة" text="مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة" />}
-          {serviceOn('quran') && <HomeEntry href="#/quran" icon={BookOpen} color="#047857" cta="جرّبها"
+          {serviceOn('quran') && !quranShowcase && <HomeEntry href="#/quran" icon={BookOpen} color="#047857" cta="جرّبها"
             title="آيات بصوت القارئ" text="اختر آيات كاملة بتلاوة قارئ حقيقي، فوق مشاهد طبيعة هادئة، جاهزة للمشاركة" />}
           {serviceOn('medical') && <HomeEntry href="#/medical" icon={Stethoscope} color="#0284c7" cta="ابدأ"
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
@@ -1121,7 +1125,7 @@ export default function App() {
       </footer>
 
       {/* Phones only: app-style bottom bar and "install the app" suggestion */}
-      <MobileAppNav view={view} studioHash="#/studio" onPackages={() => setShowPackages(true)} isOn={id => serviceOn(id)} />
+      <MobileAppNav view={view} studioHash="#/studio" onPackages={() => setShowPackages(true)} isOn={id => serviceOn(id)} studioOn={studioOn} />
     </div>
   );
 }
