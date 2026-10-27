@@ -19,7 +19,7 @@ const {
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
-const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError } = await import('./server/video.ts');
+const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, RENDER_SLOTS } = await import('./server/video.ts');
 const { isGreetingTheme } = await import('./server/greeting-themes.ts');
 const { clampPhotoBox, clampTextStyle } = await import('./server/greeting-art.ts');
 const { createGreetingBatchRouter } = await import('./server/greeting-batch.ts');
@@ -995,6 +995,9 @@ app.use('/api/medical', createMedicalRouter({ textModel: TEXT_MODEL, usageTokens
 
 // Medical reel: the doctor's information read by an AI voice over calm real scenes, with the doctor's identity along
 // the bottom and the fixed disclaimer as the closing card (see server/medical.ts)
+// Every reel waits in the shared render line; when it is full nothing is charged
+const BUSY_TEXT = 'هناك فيديوهات كثيرة قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.';
+
 app.post('/api/medical/reel', requireAuth, requireVerifiedEmail, async (req, res) => {
   const body = req.body ?? {};
   const text = String(body.text || '').trim().slice(0, MEDICAL_LIMITS.reelBody);
@@ -1011,6 +1014,7 @@ ${text}`, 'video'))) return;
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
+  if (renderQueueFull()) return res.status(503).json({ success: false, error: BUSY_TEXT });
 
   // The reel costs its fixed price (or the voice price if a long text costs more)
   const reel = { minPoints: getSettings().costMedicalReel, note: `ريل طبي · ${title || 'معلومة طبية'}` };
@@ -1077,6 +1081,7 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
+  if (renderQueueFull()) return res.status(503).json({ success: false, error: BUSY_TEXT });
 
   let recitation;
   try {
@@ -1124,6 +1129,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
+  if (renderQueueFull()) return res.status(503).json({ success: false, error: BUSY_TEXT });
 
   // The calm voice is generated now so a balance problem is reported immediately; the reel costs its fixed price
   // (or the voice price if a long text costs more)
@@ -1191,9 +1197,10 @@ function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCa
 app.get('/api/video/jobs/:id', requireAuth, (req, res) => {
   const job = videoJobs.get(req.params.id);
   if (!job || job.userId !== req.user!.id) return res.status(404).json({ success: false, error: 'المهمة غير موجودة' });
-  // Position in line = queued jobs created before this one
-  const ahead = [...videoJobs.values()].filter(j => j.status === 'queued' && j.createdAt < job.createdAt).length
-    + ([...videoJobs.values()].some(j => j.status === 'rendering' && j !== job) && job.status === 'queued' ? 1 : 0);
+  // Position in line = queued jobs created before this one, plus one while every render slot is taken
+  const jobs = [...videoJobs.values()];
+  const ahead = job.status !== 'queued' ? 0 : jobs.filter(j => j.status === 'queued' && j.createdAt < job.createdAt).length
+    + (jobs.filter(j => j.status === 'rendering').length >= RENDER_SLOTS ? 1 : 0);
   res.json({ success: true, status: job.status, progress: job.progress, ahead, error: job.error });
 });
 

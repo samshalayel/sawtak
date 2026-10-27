@@ -291,11 +291,18 @@ async function buildBackground(layout: Layout, image: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-// ---------- Render queue (one ffmpeg at a time: the server is shared) ----------
+// ---------- Render queue ----------
+// One render uses nearly all of a 6-core server, so renders run RENDER_SLOTS at a time (1 by default; ~1 per 4 cores
+// on a bigger machine). Up to RENDER_QUEUE jobs (running + waiting) are accepted; customers see their place in line.
 
-let queue: Promise<unknown> = Promise.resolve();
-let waiting = 0;
-const MAX_WAITING = 4;
+export const RENDER_SLOTS = Math.max(1, Math.floor(Number(process.env.RENDER_SLOTS)) || 1);
+const MAX_WAITING = Math.max(RENDER_SLOTS, Math.floor(Number(process.env.RENDER_QUEUE)) || 15);
+let running = 0;
+let waiting = 0;   // running + waiting to start
+const nextUp: (() => void)[] = [];
+
+/** True when a new render would be refused; checked before charging so a full line costs the customer nothing. */
+export const renderQueueFull = () => waiting >= MAX_WAITING;
 
 export class RenderBusyError extends Error {}
 
@@ -342,13 +349,25 @@ export async function renderVoiceVideo(opts: RenderOptions): Promise<Buffer> {
   return enqueueRender(() => renderNow(opts), opts.onStart);
 }
 
-/** Runs a render through the shared one-at-a-time queue (the server is shared with other apps). */
+/** Runs a render through the shared queue: first come, first served, RENDER_SLOTS at a time. */
 export function enqueueRender<T>(task: () => Promise<T>, onStart?: () => void): Promise<T> {
-  if (waiting >= MAX_WAITING) throw new RenderBusyError('Render queue is full');
+  if (renderQueueFull()) return Promise.reject(new RenderBusyError('Render queue is full'));
   waiting++;
-  const job = queue.then(() => { onStart?.(); return task(); });
-  queue = job.catch(() => {}).finally(() => { waiting--; });
-  return job;
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      running++;
+      Promise.resolve()
+        .then(() => { onStart?.(); return task(); })
+        .then(resolve, reject)
+        .finally(() => {
+          running--;
+          waiting--;
+          nextUp.shift()?.();
+        });
+    };
+    if (running < RENDER_SLOTS) start();
+    else nextUp.push(start);
+  });
 }
 
 async function renderNow({ wav, text, image, format, greeting, title = '', captions = true, hd = false, domain = 'tts.smartcloud.ps', onProgress }: RenderOptions): Promise<Buffer> {

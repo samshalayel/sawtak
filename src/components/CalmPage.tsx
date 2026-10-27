@@ -170,6 +170,8 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   const [support, setSupport] = useState(DEFAULT_SUPPORT);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  // Reels waiting in the shared render line before this one (0 once it starts)
+  const [ahead, setAhead] = useState(0);
   const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
   const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -261,6 +263,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     if (chosen.length === 0) return setError({ text: 'اختر مشهداً واحداً على الأقل (حتى ثلاثة)' });
     setBusy(true);
     setProgress(0);
+    setAhead(0);
     if (result) URL.revokeObjectURL(result.url);
     setResult(null);
     try {
@@ -281,6 +284,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         const s = await fetch(`/api/video/jobs/${job.jobId}`).then(r => r.json()).catch(() => ({}));
         if (s.status === 'error' || s.success === false) throw new Error(s.error || 'تعذّر تجهيز الريل');
         setProgress(Math.round((s.progress || 0) * 100));
+        setAhead(s.status === 'queued' ? s.ahead || 0 : 0);
         if (s.status === 'done') {
           const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
           if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
@@ -643,7 +647,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
       )}
       {busy && (
         <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-slate-300"><span>{progress === 0 ? (quranMode ? 'نجهّز التلاوة والمشاهد…' : 'نسجّل الصوت ونحضّر المشاهد…') : 'نجهّز الريل…'}</span><span className="font-mono text-emerald-300">{progress}%</span></div>
+          <div className="flex justify-between text-xs text-slate-300"><span>{ahead > 0 ? `في الدور، قبلك ${ahead} ${ahead === 1 ? 'ريل' : 'ريلز'}… لا تغلق الصفحة` : progress === 0 ? (quranMode ? 'نجهّز التلاوة والمشاهد…' : 'نسجّل الصوت ونحضّر المشاهد…') : 'نجهّز الريل…'}</span><span className="font-mono text-emerald-300">{progress}%</span></div>
           <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-gradient-to-l from-emerald-400 to-emerald-600 transition-all duration-700" style={{ width: `${Math.max(3, progress)}%` }} /></div>
         </div>
       )}

@@ -22,6 +22,7 @@ const FONTS_DIR = path.resolve('fonts'); // calligraphy faces for the day sticke
 const W = 720;
 const H = 1280;
 const FADE = 1.2; // seconds of cross-fade between scenes
+const FPS = 25;   // slow calm footage looks the same as at 30, and each reel renders faster
 
 /** Arabic scene categories -> English Pixabay queries (Pixabay has no Arabic search). */
 export const CALM_SCENES: Record<string, string> = {
@@ -397,7 +398,7 @@ async function renderNow(o: CalmRenderOptions): Promise<Buffer> {
       await fs.writeFile(path.join(dir, `t${k}.png`), t.png);
       pictures.push({ file: `t${k}.png`, x: t.x, y: t.y, start: t.start, end: t.end, fade: t.fade, fadeOut: true });
     }
-    const iconInput = pictures.flatMap(p => ['-framerate', '30', '-loop', '1', '-t', (p.end - p.start).toFixed(2), '-i', p.file]);
+    const iconInput = pictures.flatMap(p => ['-framerate', String(FPS), '-loop', '1', '-t', (p.end - p.start).toFixed(2), '-i', p.file]);
     const iconFilter = pictures.map((p, j) => {
       const len = p.end - p.start;
       const fade = Math.min(p.fade, len / 2);
@@ -408,7 +409,7 @@ async function renderNow(o: CalmRenderOptions): Promise<Buffer> {
     const inputs = segments.flatMap(s => ['-t', s.len.toFixed(2), '-i', s.file]);
     const voiceIdx = segments.length;
     const prep = segments.map((s, i) =>
-      `[${i}:v]trim=0:${s.len.toFixed(2)},setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,format=yuv420p,eq=brightness=-0.1:saturation=1.05,setsar=1[s${i}]`);
+      `[${i}:v]trim=0:${s.len.toFixed(2)},setpts=PTS-STARTPTS,fps=${FPS},crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=${W}:${H},format=yuv420p,eq=brightness=-0.1:saturation=1.05,setsar=1[s${i}]`);
     const fades: string[] = [];
     let last = 's0';
     let offset = segments[0].len - FADE;
@@ -430,7 +431,7 @@ async function renderNow(o: CalmRenderOptions): Promise<Buffer> {
       ...inputs, '-i', 'voice.wav', ...iconInput,
       '-filter_complex', filter,
       '-map', '[vout]', '-map', '[aout]',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-maxrate', '4M', '-bufsize', '8M', '-r', '30', '-pix_fmt', 'yuv420p',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-maxrate', '4M', '-bufsize', '8M', '-r', String(FPS), '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-t', String(total), '-movflags', '+faststart', 'out.mp4',
     ], dir, { timeoutMs: renderTimeoutMs(total) * 3, duration: total, onProgress: o.onProgress });
     return await fs.readFile(path.join(dir, 'out.mp4'));
