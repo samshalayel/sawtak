@@ -1089,7 +1089,7 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   }
   const text = recitation.captions.map(c => c.text).join(' ');
   if (!title) title = recitation.title;
-  // The reciter's name under the title (unless the customer turned it off)
+  // The reciter's name, above the title by default (unless the customer turned it off)
   const reciterName = QURAN_RECITERS.find(r => r.id === quranPick.reciter)?.name;
   const info = body.showReciter !== false && reciterName ? `بصوت الشيخ ${reciterName}` : '';
   try {

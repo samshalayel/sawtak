@@ -100,8 +100,9 @@ const FontPicker: React.FC<{ value: string; onChange: (id: string) => void }> = 
   );
 };
 const COLORS = ['#ffffff', '#fff4d6', '#f5d58a', '#c8f2dc', '#cde8ff', '#f9d5e5', '#1e293b'];
-// Positions are dragged on the preview: the title's top, then the centres of the line under it and of the dedication
-const DEFAULT_STYLE = { font: 'naskh' as string, color: '#ffffff', size: 88, y: 840, titleSize: 58, titleY: 140, infoY: 262, dedicationY: 1120 };
+// Positions are dragged on the preview: the title's top, then the centres of the reciter line (above the title by
+// default) and of the dedication
+const DEFAULT_STYLE = { font: 'naskh' as string, color: '#ffffff', size: 88, y: 840, titleSize: 58, titleY: 140, infoY: 60, dedicationY: 1070 };
 type StyleY = 'y' | 'titleY' | 'infoY' | 'dedicationY';
 const PREVIEW_W = 252;
 const K = PREVIEW_W / 720;
@@ -394,7 +395,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
             </div>
             <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
               <input type="checkbox" checked={showReciter} onChange={e => setShowReciter(e.target.checked)} className="accent-emerald-500" />
-              اكتب اسم القارئ تحت العنوان
+              اكتب اسم القارئ على الفيديو
             </label>
           </>
         ) : (
@@ -495,7 +496,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
                   <div {...drag('titleY', 40, 1160)} className="absolute z-10 inset-x-0 text-center font-bold px-3 leading-snug" style={{ ...grab, top: style.titleY * K, fontFamily: family, fontWeight: weight, fontSize: style.titleSize * K * 0.6, color: style.color, textShadow: halo }}>{shownTitle}</div>
                 )}
                 {info && (
-                  <div {...drag('infoY', 60, 1200)} className="absolute z-10 inset-x-0 text-center font-bold px-3 leading-snug -translate-y-1/2" style={{ ...grab, top: style.infoY * K, fontFamily: family, fontWeight: weight, fontSize: style.titleSize * 0.62 * K * 0.6, color: style.color, textShadow: halo }}>{info}</div>
+                  <div {...drag('infoY', 40, 1200)} className="absolute z-10 inset-x-0 text-center font-bold px-3 leading-snug -translate-y-1/2" style={{ ...grab, top: style.infoY * K, fontFamily: family, fontWeight: weight, fontSize: style.titleSize * 0.62 * K * 0.6, color: style.color, textShadow: halo }}>{info}</div>
                 )}
                 <div {...drag('y', 220, 1120)} className="absolute z-10 text-center font-bold leading-snug -translate-y-1/2" style={{ ...grab, top: style.y * K, left: 55 * K, right: 55 * K, fontFamily: family, fontWeight: weight, fontSize: style.size * K * 0.6, color: style.color, textShadow: halo }}>{sample}</div>
                 {dedication.trim() && (

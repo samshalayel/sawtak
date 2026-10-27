@@ -114,7 +114,7 @@ export interface CalmRenderOptions {
   /** Quran reels: one entry per verse with its exact span in `voice` (seconds); replaces the timing guessed from text. */
   verses?: { text: string; start: number; end: number }[];
   title: string;          // optional line at the top
-  /** Optional smaller line under the title (Quran reels: the reciter's name). */
+  /** Optional smaller line near the title, above it by default (Quran reels: the reciter's name). */
   info?: string;
   /** Optional text shown for the whole reel, e.g. a dedication ("عن روح ..."). */
   dedication?: string;
@@ -133,7 +133,7 @@ export interface CalmRenderOptions {
  * title's top, and the vertical centres of the line under it and of the dedication (all dragged on the preview).
  */
 export interface CalmStyle { font: string; color: string; size: number; y: number; titleSize: number; titleY: number; infoY: number; dedicationY: number }
-export const DEFAULT_CALM_STYLE: CalmStyle = { font: 'naskh', color: '#ffffff', size: 88, y: 840, titleSize: 58, titleY: 140, infoY: 262, dedicationY: 1120 };
+export const DEFAULT_CALM_STYLE: CalmStyle = { font: 'naskh', color: '#ffffff', size: 88, y: 840, titleSize: 58, titleY: 140, infoY: 60, dedicationY: 1070 };
 
 export function clampCalmStyle(raw: any): CalmStyle {
   if (!raw || typeof raw !== 'object') return DEFAULT_CALM_STYLE;
@@ -148,7 +148,7 @@ export function clampCalmStyle(raw: any): CalmStyle {
     y: num(raw.y, 220, 1120, DEFAULT_CALM_STYLE.y),
     titleSize: num(raw.titleSize, 36, 100, DEFAULT_CALM_STYLE.titleSize),
     titleY: num(raw.titleY, 40, 1160, DEFAULT_CALM_STYLE.titleY),
-    infoY: num(raw.infoY, 60, 1200, DEFAULT_CALM_STYLE.infoY),
+    infoY: num(raw.infoY, 40, 1200, DEFAULT_CALM_STYLE.infoY),
     dedicationY: num(raw.dedicationY, 60, 1200, DEFAULT_CALM_STYLE.dedicationY),
   };
 }
