@@ -50,12 +50,13 @@ export const QuranShowcase: React.FC<{ price: number }> = ({ price }) => (
           <span className="absolute -left-[3px] top-[34%] w-[3px] h-11 rounded-l-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
           <span className="absolute -right-[3px] top-[28%] w-[3px] h-16 rounded-r-sm bg-gradient-to-b from-[#d4d4d8] to-[#a1a1aa]" />
           <div className="rounded-[2.7rem] p-[3px] bg-gradient-to-b from-[#e4e4e7] via-[#a1a1aa] to-[#d4d4d8] shadow-2xl">
-            <div className="rounded-[2.55rem] bg-[#000000] p-[10px]">
-              <div className="relative overflow-hidden rounded-[2rem] bg-[#000000]">
+            <div className="rounded-[2.55rem] bg-[#000000] p-[6px]">
+              {/* A phone-shaped screen (19.5:9) with the 9:16 reel in the middle, as a phone plays it */}
+              <div className="relative overflow-hidden rounded-[2.2rem] bg-[#000000] aspect-[9/19.5] flex items-center">
                 <video src="/examples/quran-reel.mp4" poster="/examples/quran-reel.jpg" controls playsInline preload="none"
                   className="block w-full aspect-[9/16] object-cover" />
-                {/* Notch (small enough to leave the reciter's name at the top visible) */}
-                <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[38%] h-[15px] bg-[#000000] rounded-b-[10px] flex items-center justify-end pr-3">
+                {/* Notch (over the black band above the reel) */}
+                <div className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[38%] h-[20px] bg-[#000000] rounded-b-[12px] flex items-center justify-end pr-3">
                   <span className="w-[6px] h-[6px] rounded-full bg-[#1e2638] ring-1 ring-[#334063]" />
                 </div>
               </div>
