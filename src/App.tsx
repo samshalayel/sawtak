@@ -75,16 +75,6 @@ const STEPS = [
   { id: 4, title: 'ولّد الصوت', hint: 'راجع واستمع وحمّل', icon: Wand2 },
 ] as const;
 
-/** Shown instead of a page whose service an admin has stopped. */
-const ServiceOff: React.FC = () => (
-  <div className="text-center py-14 space-y-2">
-    <div className="text-3xl">⏸️</div>
-    <p className="text-base font-bold text-slate-200">هذه الخدمة متوقفة مؤقتاً</p>
-    <p className="text-sm text-slate-400">نعمل عليها حالياً، يرجى المحاولة لاحقاً.</p>
-    <a href="#/" className="inline-block mt-2 text-sm text-amber-400 hover:underline">العودة للرئيسية</a>
-  </div>
-);
-
 /** A home-page entry to one service: a white card framed in the service's colour. */
 const HomeEntry: React.FC<{ href: string; icon: React.ElementType; color: string; title: string; text: string; cta: string }> = ({ href, icon: Icon, color, title, text, cta }) => (
   <a href={href} className="group flex items-center gap-3 rounded-2xl px-4 py-3 bg-slate-900 border-2 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition" style={{ borderColor: color }}>
@@ -116,6 +106,11 @@ export default function App() {
   const [showVideoMaker, setShowVideoMaker] = useState(false);
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
   const [view, setView] = useState<View>(readView);
+  // A page whose service an admin has stopped goes back to the home page (once the account and settings are known)
+  const viewStopped = (['press', 'greetings', 'calm', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v));
+  useEffect(() => {
+    if (authLoaded && viewStopped) window.location.hash = '#/';
+  }, [authLoaded, viewStopped]);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const { favorites, toggle: toggleFavorite } = useFavoriteVoices(user, setUser);
 
@@ -740,10 +735,8 @@ export default function App() {
           onCurrentUserCreditsChange={(credits) => setUser(prev => (prev ? { ...prev, credits } : prev))}
         />
       </main>
-      ) : (['press', 'greetings', 'calm', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v)) ? (
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
-        <ServiceOff />
-      </main>
+      ) : viewStopped ? (
+      <main className="flex-1" />
       ) : view === 'press' ? (
       <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <PressPage
