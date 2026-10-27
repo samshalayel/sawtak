@@ -819,7 +819,6 @@ export default function App() {
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
         </div>
 
-        {!serviceOn('tts') && !serviceOn('dialogue') && <ServiceOff />}
         {/* Mode: single voice vs two-speaker dialogue */}
         <div className="grid grid-cols-2 gap-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-1.5">
           {([
