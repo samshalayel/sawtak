@@ -3,7 +3,7 @@
 import express from 'express';
 import { AppSettings, getSettings } from './db.ts';
 
-export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'motion', 'press', 'payments', 'medical'] as const;
+export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'quran', 'motion', 'press', 'payments', 'medical'] as const;
 export type ServiceId = (typeof SERVICES)[number];
 
 /** The setting behind each switch (1 = on, 0 = off). */
@@ -12,6 +12,7 @@ export const SERVICE_SETTING: Record<ServiceId, keyof AppSettings> = {
   dialogue: 'serviceDialogue',
   greetings: 'serviceGreetings',
   calm: 'serviceCalm',
+  quran: 'serviceQuran',
   motion: 'serviceMotion',
   press: 'servicePress',
   payments: 'servicePayments',
@@ -43,6 +44,7 @@ function serviceOf(method: string, path: string): ServiceId | null {
   if (path === '/api/tts/tashkeel' || path === '/api/tts/optimize-script') return 'tts';
   if (path === '/api/greetings/batch' || path === '/api/greetings/batch/') return 'greetings';
   if (path === '/api/calm/render') return 'calm';
+  if (path === '/api/quran/render') return 'quran';
   if (path === '/api/motion/script' || path === '/api/motion/jobs') return 'motion';
   if (path.startsWith('/api/press/')) return 'press';
   if (path === '/api/jawwal/otp' || path === '/api/jawwal/pay') return 'payments';

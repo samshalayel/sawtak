@@ -113,12 +113,14 @@ interface AppSettings {
   costMotionLibrary: number;
   costMotionFree: number;
   costCalmReel: number;
+  costQuranReel: number;
   costMedicalCard: number;
   costMedicalReel: number;
   serviceTts: number;
   serviceDialogue: number;
   serviceGreetings: number;
   serviceCalm: number;
+  serviceQuran: number;
   serviceMotion: number;
   servicePress: number;
   servicePayments: number;
@@ -845,7 +847,8 @@ const UsageTab: React.FC = () => {
 const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string; hint: string }[] = [
   { key: 'costTtsPerMinute',   label: 'نص → صوت', icon: '🎙️', hint: 'نقطة لكل دقيقة صوت (الاستوديو، الحوار، تقديم المذيع)' },
   { key: 'costGreeting',       label: 'بطاقة تهنئة', icon: '🎴', hint: 'نقطة للبطاقة شاملة الصوت والفيديو (أو سعر الصوت إن كان أطول)' },
-  { key: 'costCalmReel',       label: 'ريل سكينة', icon: '🍃', hint: 'نقطة للريل شامل الصوت أو تلاوة القارئ (أو سعر الصوت إن كان أطول)' },
+  { key: 'costCalmReel',       label: 'ريل سكينة', icon: '🍃', hint: 'نقطة للريل شامل الصوت (أو سعر الصوت إن كان أطول)' },
+  { key: 'costQuranReel',      label: 'ريل آيات قرآنية', icon: '📖', hint: 'نقطة للريل بتلاوة القارئ الأصلية' },
   { key: 'costMedicalCard',    label: 'بطاقة طبية', icon: '🩺', hint: 'نقطة للبطاقة (صورة)، والمراجعة الذكية مجانية' },
   { key: 'costMedicalReel',    label: 'ريل طبي', icon: '🎞️', hint: 'نقطة للريل شامل الصوت (أو سعر الصوت إن كان أطول)' },
   { key: 'costMotionLibrary',  label: 'ريلز — نسق جاهز', icon: '🎬', hint: 'نقطة للفيديو الواحد' },
@@ -857,7 +860,8 @@ const SERVICE_SWITCHES: { key: keyof AppSettings; label: string; icon: string }[
   { key: 'serviceTts', label: 'استوديو الصوت (صوت واحد)', icon: '🎙️' },
   { key: 'serviceDialogue', label: 'الحوار بين صوتين', icon: '🗣️' },
   { key: 'serviceGreetings', label: 'التهاني بالصوت والفيديو', icon: '🎴' },
-  { key: 'serviceCalm', label: 'ريلز السكينة والآيات', icon: '🍃' },
+  { key: 'serviceCalm', label: 'ريلز السكينة', icon: '🍃' },
+  { key: 'serviceQuran', label: 'ريلز الآيات بصوت القارئ', icon: '📖' },
   { key: 'serviceMotion', label: 'الموشن جرافيك', icon: '🎬' },
   { key: 'servicePress', label: 'استوديو الصحفيين', icon: '📰' },
   { key: 'servicePayments', label: 'الدفع بجوال باي', icon: '💳' },

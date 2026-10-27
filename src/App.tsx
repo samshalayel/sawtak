@@ -16,7 +16,7 @@ import { CalmPage } from './components/CalmPage';
 import { MedicalPage } from './components/MedicalPage';
 import { MotionTab } from './components/MotionTab';
 import { MobileAppNav } from './components/MobileAppNav';
-import { PartyPopper, Newspaper, Leaf, Stethoscope } from 'lucide-react';
+import { PartyPopper, Newspaper, Leaf, Stethoscope, BookOpen } from 'lucide-react';
 import { LandingPage } from './components/LandingPage';
 import { DialogueVoicePicker, DialogueSpeaker } from './components/DialogueVoicePicker';
 import { DialogueEditor } from './components/DialogueEditor';
@@ -51,7 +51,7 @@ import {
 } from 'lucide-react';
 
 // "home" = landing page for visitors (logged-in users land in the studio)
-type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'motion' | 'medical';
+type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'quran' | 'motion' | 'medical';
 const readView = (): View => {
   const hash = window.location.hash;
   if (hash === '#/admin') return 'admin';
@@ -59,6 +59,7 @@ const readView = (): View => {
   if (hash === '#/greetings') return 'greetings';
   if (hash === '#/press') return 'press';
   if (hash === '#/calm') return 'calm';
+  if (hash === '#/quran') return 'quran';
   if (hash === '#/motion') return 'motion';
   if (hash === '#/medical') return 'medical';
   if (hash === '#/studio') return 'studio';
@@ -107,7 +108,7 @@ export default function App() {
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
   const [view, setView] = useState<View>(readView);
   // A page whose service an admin has stopped goes back to the home page (once the account and settings are known)
-  const viewStopped = (['press', 'greetings', 'calm', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v));
+  const viewStopped = (['press', 'greetings', 'calm', 'quran', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v));
   useEffect(() => {
     if (authLoaded && viewStopped) window.location.hash = '#/';
   }, [authLoaded, viewStopped]);
@@ -754,9 +755,11 @@ export default function App() {
           <div className="text-center text-sm text-slate-400 py-16">هذه الميزة غير مفعّلة لحسابك.</div>
         )}
       </main>
-      ) : view === 'calm' ? (
+      ) : view === 'calm' || view === 'quran' ? (
       <main className="flex-1 max-w-4xl lg:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <CalmPage
+          key={view}
+          quranMode={view === 'quran'}
           user={user}
           prices={config.prices ?? DEFAULT_PRICES}
           onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
@@ -808,6 +811,8 @@ export default function App() {
             title="استوديو الصحفيين" text="حوّل مقالك إلى بودكاست أو نشرة أخبار أو ملخص مسموع، بفيديو بهوية مؤسستك" />}
           {serviceOn('calm') && <HomeEntry href="#/calm" icon={Leaf} color="#059669" cta="جرّبها"
             title="ريلز السكينة" text="مشاهد طبيعة هادئة، وصوت دافئ، وكلمات تريح القلب، جاهزة للمشاركة" />}
+          {serviceOn('quran') && <HomeEntry href="#/quran" icon={BookOpen} color="#047857" cta="جرّبها"
+            title="آيات بصوت القارئ" text="اختر آيات كاملة بتلاوة قارئ حقيقي، فوق مشاهد طبيعة هادئة، جاهزة للمشاركة" />}
           {serviceOn('medical') && <HomeEntry href="#/medical" icon={Stethoscope} color="#0284c7" cta="ابدأ"
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
         </div>

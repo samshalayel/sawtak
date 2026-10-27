@@ -64,7 +64,7 @@ export const PackagesModal: React.FC<PackagesModalProps> = ({ user, prices, paym
           باقات النقاط
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          دقيقة صوت = {prices.voicePerMinute} نقاط · بطاقة تهنئة = {prices.greeting} نقطة · ريل سكينة = {prices.calmReel} نقطة · فيديو موشن = {prices.motionLibrary}–{prices.motionFree} نقطة
+          دقيقة صوت = {prices.voicePerMinute} نقاط · بطاقة تهنئة = {prices.greeting} نقطة · ريل سكينة = {prices.calmReel} نقطة · ريل آيات = {prices.quranReel} نقطة · فيديو موشن = {prices.motionLibrary}–{prices.motionFree} نقطة
         </p>
 
         {!paymentsOn && (

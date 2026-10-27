@@ -1059,52 +1059,64 @@ ${text}`, 'video'))) return;
 });
 app.use('/api/jawwal', jawwalRouter);
 
-app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res) => {
+// Quran reel (its own service): a reciter's recitation of whole verses over calm scenes, each verse's captions laid
+// over the reciter's sound (see server/quran.ts). No AI voice, so only the reel price is charged.
+app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res) => {
   const body = req.body ?? {};
-  let text = String(body.text || '').trim().slice(0, 1200);
   let title = String(body.title || '').trim().slice(0, 60);
   const supportCard = String(body.supportCard || '').trim().slice(0, 200);
-  const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Sulafat';
-  const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
   const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
-  // A Quran reel uses a reciter's recitation of whole verses instead of the AI voice (see server/quran.ts)
   const quranPick = body.quran ? await parseQuranPick(body.quran).catch(() => ({ error: 'تعذّر قراءة السورة، حاول بعد قليل' })) : null;
-  if (quranPick && 'error' in quranPick) return res.status(400).json({ success: false, error: quranPick.error });
-  if (!text && !quranPick) return res.status(400).json({ success: false, error: 'اكتب نص الريل أو اختر قالباً' });
+  if (!quranPick) return res.status(400).json({ success: false, error: 'اختر الآيات أولاً' });
+  if ('error' in quranPick) return res.status(400).json({ success: false, error: quranPick.error });
   if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
   const sticker = clampSticker(body.sticker);
-  if (!(await passesModeration(req, res, [title, quranPick ? '' : text, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
+  if (!(await passesModeration(req, res, [title, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
 
-  if (quranPick) {
-    let recitation;
-    try {
-      recitation = await quranRecitation(quranPick);
-    } catch (err) {
-      if (err instanceof QuranTooLongError) {
-        return res.status(400).json({ success: false, error: `التلاوة ${Math.round(err.seconds)} ثانية، والحد 3 دقائق. اختر آيات أقل.` });
-      }
-      return sendFriendlyError(res, err, 'Quran recitation');
+  let recitation;
+  try {
+    recitation = await quranRecitation(quranPick);
+  } catch (err) {
+    if (err instanceof QuranTooLongError) {
+      return res.status(400).json({ success: false, error: `التلاوة ${Math.round(err.seconds)} ثانية، والحد 3 دقائق. اختر آيات أقل.` });
     }
-    text = recitation.captions.map(c => c.text).join(' ');
-    if (!title) title = recitation.title;
-    // No AI voice: only the reel price
-    try {
-      chargePoints(req.user!.id, getSettings().costCalmReel, `ريل آيات · ${recitation.title}`);
-    } catch (err) {
-      if (err instanceof InsufficientCreditsError) {
-        return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
-      }
-      throw err;
+    return sendFriendlyError(res, err, 'Quran recitation');
+  }
+  const text = recitation.captions.map(c => c.text).join(' ');
+  if (!title) title = recitation.title;
+  try {
+    chargePoints(req.user!.id, getSettings().costQuranReel, `ريل آيات · ${recitation.title}`);
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDITS', error: `رصيدك غير كافٍ. يحتاج الريل ${pointsText(err.needed)} ورصيدك ${pointsText(err.balance)}.` });
     }
-    const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
-    videoJobs.set(job.id, job);
-    startCalmRender(job, {
-      clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
-    });
-    return res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
+    throw err;
+  }
+  const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
+  videoJobs.set(job.id, job);
+  startCalmRender(job, {
+    clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+  });
+  res.status(202).json({ success: true, jobId: job.id, balance: getUserById(req.user!.id)?.credits ?? 0 });
+});
+
+app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res) => {
+  const body = req.body ?? {};
+  const text = String(body.text || '').trim().slice(0, 1200);
+  const title = String(body.title || '').trim().slice(0, 60);
+  const supportCard = String(body.supportCard || '').trim().slice(0, 200);
+  const voice = VOICES.some(v => v.id === body.voiceId) ? String(body.voiceId) : 'Sulafat';
+  const dialect = DIALECT_NAMES[body.dialect] ? String(body.dialect) : 'msa';
+  const clips = (Array.isArray(body.clipIds) ? body.clipIds : []).slice(0, 3).map((id: unknown) => vettedClip(Number(id))).filter(Boolean);
+  if (!text) return res.status(400).json({ success: false, error: 'اكتب نص الريل أو اختر قالباً' });
+  if (clips.length === 0) return res.status(400).json({ success: false, error: 'اختر مشهداً واحداً على الأقل (ابحث من جديد إن مرّ وقت طويل)' });
+  const sticker = clampSticker(body.sticker);
+  if (!(await passesModeration(req, res, [title, text, supportCard, sticker?.label ?? ''].join('\n'), 'video'))) return;
+  if (!videoLimiter(`user:${req.user!.id}`)) {
+    return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
 
   // The calm voice is generated now so a balance problem is reported immediately; the reel costs its fixed price

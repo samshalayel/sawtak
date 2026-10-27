@@ -189,7 +189,8 @@ export interface AppSettings {
   costGreeting: number;              // default 25 pts
   costMotionLibrary: number;         // default 100 pts
   costMotionFree: number;            // default 500 pts
-  costCalmReel: number;              // default 30 pts per calm reel (AI voice or Quran recitation)
+  costCalmReel: number;              // default 30 pts per calm reel (AI voice)
+  costQuranReel: number;             // pts per Quran reel (reciter's recitation); until set, the calm reel price
   costMedicalCard: number;           // default 15 pts per medical card image
   costMedicalReel: number;           // default 30 pts per medical reel (voice included)
   // Service switches, 1 = on, 0 = off (see server/services.ts)
@@ -197,6 +198,7 @@ export interface AppSettings {
   serviceDialogue: number;
   serviceGreetings: number;
   serviceCalm: number;
+  serviceQuran: number;              // until set, follows serviceCalm (Quran reels used to be part of calm reels)
   serviceMotion: number;
   servicePress: number;
   servicePayments: number;
@@ -226,12 +228,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   costMotionLibrary: 100,
   costMotionFree: 500,
   costCalmReel: 30,
+  costQuranReel: 30,
   costMedicalCard: 15,
   costMedicalReel: 30,
   serviceTts: 1,
   serviceDialogue: 1,
   serviceGreetings: 1,
   serviceCalm: 1,
+  serviceQuran: 1,
   serviceMotion: 1,
   servicePress: 1,
   servicePayments: 1,
@@ -259,7 +263,9 @@ export function getSettings(): AppSettings {
   const stored = Object.fromEntries(
     rows.map(r => [r.key, STRING_SETTINGS.includes(r.key as keyof AppSettings) ? r.value : Number(r.value)])
   );
-  return { ...DEFAULT_SETTINGS, ...stored } as AppSettings;
+  // Quran reels were split out of calm reels: until the admin sets their own price and switch, they keep the calm ones
+  const inherited = { costQuranReel: stored.costCalmReel ?? DEFAULT_SETTINGS.costCalmReel, serviceQuran: stored.serviceCalm ?? DEFAULT_SETTINGS.serviceCalm };
+  return { ...DEFAULT_SETTINGS, ...inherited, ...stored } as AppSettings;
 }
 
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
