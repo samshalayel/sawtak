@@ -958,7 +958,7 @@ const SettingsTab: React.FC = () => {
       <div className="border border-slate-700 rounded-xl overflow-hidden">
         <div className="bg-slate-800/60 px-4 py-2.5 flex items-center gap-2">
           <span className="text-sm font-bold text-white">💎 تسعير الخدمات بالنقاط</span>
-          <span className="text-[11px] text-slate-400">(النقطة = ₪0.02 في باقة ₪10)</span>
+          <span className="text-[11px] text-slate-400">(النقطة بين ₪{Math.min(...CUSTOMER_PACKAGES.map(p => p.priceIls / p.points)).toFixed(3)} و₪{Math.max(...CUSTOMER_PACKAGES.map(p => p.priceIls / p.points)).toFixed(3)} حسب الباقة)</span>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-900/50">

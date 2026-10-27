@@ -17,12 +17,13 @@ export interface CreditPackage {
 export const OFFER_ENDS_AT = new Date('2026-12-31T23:59:59+02:00');
 
 // The single price list: the server charges exactly these prices (server/jawwal.ts imports this file)
+// (Ids name the points, so payments recorded under the old list — p50…p500 — keep their meaning.)
 export const PACKAGES: CreditPackage[] = [
-  { id: 'p50',  points: 500,  priceIls: 10,  bonusPoints: 0   },
-  { id: 'p100', points: 1000, priceIls: 20,  bonusPoints: 100 },
-  { id: 'p250', points: 2500, priceIls: 50,  bonusPoints: 500, popular: true },
-  { id: 'p500', points: 5000, priceIls: 100, bonusPoints: 1000 },
-  { id: 'test1', points: 50,  priceIls: 1,   bonusPoints: 0, adminOnly: true },
+  { id: 'p80',   points: 80,   priceIls: 5,  bonusPoints: 0 },
+  { id: 'p200',  points: 200,  priceIls: 10, bonusPoints: 0 },
+  { id: 'p450',  points: 450,  priceIls: 20, bonusPoints: 0, popular: true },
+  { id: 'p1000', points: 1000, priceIls: 50, bonusPoints: 0 },
+  { id: 'test1', points: 50,   priceIls: 1,  bonusPoints: 0, adminOnly: true },
 ];
 
 /** Packages an account may see and buy (customers never see the admin test package). */
@@ -31,8 +32,9 @@ export const CUSTOMER_PACKAGES = packagesFor(false);
 
 export const WORDS_PER_MINUTE_TYPICAL = 100;
 
+/** The launch offer shows only while it runs and some package still carries gift points. */
 export function isOfferActive(now = new Date()): boolean {
-  return now <= OFFER_ENDS_AT;
+  return now <= OFFER_ENDS_AT && PACKAGES.some(p => !p.adminOnly && p.bonusPoints > 0);
 }
 
 export function offerDaysLeft(now = new Date()): number {
