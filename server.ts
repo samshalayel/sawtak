@@ -19,7 +19,8 @@ const {
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
-const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, RENDER_SLOTS } = await import('./server/video.ts');
+const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
+const { lambdaConfigured, renderOnLambda, reelLink } = await import('./server/reel-lambda.ts');
 const { isGreetingTheme } = await import('./server/greeting-themes.ts');
 const { clampPhotoBox, clampTextStyle } = await import('./server/greeting-art.ts');
 const { createGreetingBatchRouter } = await import('./server/greeting-batch.ts');
@@ -627,6 +628,9 @@ interface VideoJob {
   startedAt?: number;
   /** When the job was first seen finished (done or error), for the clean-up below. */
   finishedAt?: number;
+  /** Rendered in AWS Lambda: the MP4 is in S3 under this key (streamed from there), not in `result`. */
+  onLambda?: boolean;
+  s3Key?: string;
 }
 
 // In-memory jobs. A finished video is kept 30 minutes after it is ready (it plays from here and is downloaded from
@@ -1008,8 +1012,10 @@ app.use('/api/medical', createMedicalRouter({ textModel: TEXT_MODEL, usageTokens
 
 // Medical reel: the doctor's information read by an AI voice over calm real scenes, with the doctor's identity along
 // the bottom and the fixed disclaimer as the closing card (see server/medical.ts)
-// Every reel waits in the shared render line; when it is full nothing is charged
+// Every reel waits in the shared render line; when it is full nothing is charged (calm and Quran reels can still go
+// to AWS Lambda when it is on)
 const BUSY_TEXT = 'هناك فيديوهات كثيرة قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.';
+const lambdaOn = () => lambdaConfigured() && getSettings().reelLambda > 0;
 
 app.post('/api/medical/reel', requireAuth, requireVerifiedEmail, async (req, res) => {
   const body = req.body ?? {};
@@ -1094,7 +1100,7 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
-  if (renderQueueFull()) return res.status(503).json({ success: false, error: BUSY_TEXT });
+  if (renderQueueFull() && !lambdaOn()) return res.status(503).json({ success: false, error: BUSY_TEXT });
 
   let recitation;
   try {
@@ -1152,7 +1158,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   if (!videoLimiter(`user:${req.user!.id}`)) {
     return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
   }
-  if (renderQueueFull()) return res.status(503).json({ success: false, error: BUSY_TEXT });
+  if (renderQueueFull() && !lambdaOn()) return res.status(503).json({ success: false, error: BUSY_TEXT });
 
   // The calm voice is generated now so a balance problem is reported immediately; the reel costs its fixed price
   // (or the voice price if a long text costs more)
@@ -1201,6 +1207,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
 // this server, learnt from the reels it finished (render seconds per second of video; 74 s for a 48 s reel when
 // measured). Other videos in the shared line count as a minute each.
 let renderPace = 1.6;
+let lambdaPace = 1.6;
 const OTHER_VIDEO_SECONDS = 60;
 
 function remainingSeconds(j: VideoJob) {
@@ -1215,7 +1222,7 @@ function remainingSeconds(j: VideoJob) {
 function etaSeconds(job: VideoJob) {
   if (job.status === 'done' || job.status === 'error') return 0;
   if (job.status === 'rendering') return remainingSeconds(job);
-  const jobs = [...videoJobs.values()];
+  const jobs = [...videoJobs.values()].filter(j => !j.onLambda);
   const before = [
     ...jobs.filter(j => j.status === 'rendering'),
     ...jobs.filter(j => j.status === 'queued' && j.createdAt < job.createdAt).sort((a, b) => a.createdAt - b.createdAt),
@@ -1233,6 +1240,41 @@ function startCalmRender(job: VideoJob, options: Omit<Parameters<typeof renderCa
   // Length of the reel: the voice, a breath before it and the ending (longer with a support card)
   job.reelSeconds = pcmSeconds(options.voice) + (options.supportCard ? 5.7 : 3);
   job.estimate = job.reelSeconds * renderPace;
+  // AWS Lambda (calm and Quran reels; medical reels carry a logo and stay here): always, or when this server is busy
+  const mode = getSettings().reelLambda;
+  if (!options.brand && lambdaConfigured() && (mode === 2 || (mode === 1 && localRenderBusy()))) {
+    job.onLambda = true;
+    job.status = 'rendering';
+    job.startedAt = Date.now();
+    job.estimate = job.reelSeconds * lambdaPace;
+    // Lambda reports nothing while it works: the progress follows the expected time
+    const timer = setInterval(() => { job.progress = Math.min(0.95, (Date.now() - job.startedAt!) / 1000 / (job.estimate || 60)); }, 1000);
+    renderOnLambda(job.id, options).then(r => {
+      clearInterval(timer);
+      job.s3Key = r.key;
+      job.status = 'done';
+      job.progress = 1;
+      const took = (Date.now() - job.startedAt!) / 1000;
+      lambdaPace = Math.min(6, Math.max(0.3, lambdaPace * 0.7 + (took / job.reelSeconds!) * 0.3));
+      onDone?.(true, took);
+    }).catch(error => {
+      // Not lost: the reel is made here instead
+      clearInterval(timer);
+      console.error('Lambda reel failed, rendering on this server:', error?.message || error);
+      job.onLambda = false;
+      job.status = 'queued';
+      job.progress = 0;
+      job.startedAt = undefined;
+      job.estimate = job.reelSeconds! * renderPace;
+      renderCalmHere(job, options, onDone);
+    });
+    return;
+  }
+  renderCalmHere(job, options, onDone);
+}
+
+/** The reel on this server, through the shared render line. */
+function renderCalmHere(job: VideoJob, options: Omit<Parameters<typeof renderCalmReel>[0], 'onStart' | 'onProgress'>, onDone?: (ok: boolean, renderSeconds: number, error?: string) => void) {
   renderCalmReel({
     ...options,
     onStart: () => { job.status = 'rendering'; job.startedAt = Date.now(); },
@@ -1261,18 +1303,28 @@ app.get('/api/video/jobs/:id', requireAuth, (req, res) => {
   // Position in line = queued jobs created before this one, plus one while every render slot is taken
   const jobs = [...videoJobs.values()];
   const ahead = job.status !== 'queued' ? 0 : jobs.filter(j => j.status === 'queued' && j.createdAt < job.createdAt).length
-    + (jobs.filter(j => j.status === 'rendering').length >= RENDER_SLOTS ? 1 : 0);
+    + (jobs.filter(j => j.status === 'rendering' && !j.onLambda).length >= RENDER_SLOTS ? 1 : 0);
   res.json({ success: true, status: job.status, progress: job.progress, ahead, eta: Math.round(etaSeconds(job)), error: job.error });
 });
 
-app.get('/api/video/jobs/:id/file', requireAuth, (req, res) => {
+app.get('/api/video/jobs/:id/file', requireAuth, async (req, res) => {
   const job = videoJobs.get(req.params.id);
-  if (!job || job.userId !== req.user!.id || job.status !== 'done' || !job.result) {
+  if (!job || job.userId !== req.user!.id || job.status !== 'done' || (!job.result && !job.s3Key)) {
     return res.status(404).json({ success: false, error: 'الفيديو غير جاهز' });
   }
-  const file = job.result;
+  const name = String(req.query.name || 'reel').replace(/[^\w.-]/g, '') || 'reel';
+  // Made in Lambda: straight from S3 through a short-lived link (byte ranges work there too)
+  if (job.s3Key) {
+    try {
+      return res.redirect(302, await reelLink(job.s3Key, req.query.download ? name : undefined));
+    } catch (err) {
+      console.error('S3 link failed:', err);
+      return res.status(503).json({ success: false, error: 'تعذّر جلب الفيديو، حاول بعد قليل.' });
+    }
+  }
+  const file = job.result!;
   // ?download=1 saves it as a file; otherwise the page's video plays it while it streams in (byte ranges)
-  if (req.query.download) res.set('Content-Disposition', `attachment; filename="${String(req.query.name || 'reel').replace(/[^\w.-]/g, '') || 'reel'}.mp4"`);
+  if (req.query.download) res.set('Content-Disposition', `attachment; filename="${name}.mp4"`);
   res.set({ 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=1800' });
   const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
   if (range && (range[1] || range[2])) {

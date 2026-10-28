@@ -303,6 +303,8 @@ const nextUp: (() => void)[] = [];
 
 /** True when a new render would be refused; checked before charging so a full line costs the customer nothing. */
 export const renderQueueFull = () => waiting >= MAX_WAITING;
+/** True when a new render would have to wait (every slot taken): reels then go to AWS Lambda when it is on. */
+export const localRenderBusy = () => running >= RENDER_SLOTS;
 
 export class RenderBusyError extends Error {}
 

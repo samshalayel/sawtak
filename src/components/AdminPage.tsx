@@ -129,6 +129,7 @@ interface AppSettings {
   servicePayments: number;
   serviceMedical: number;
   betaRibbon: number;
+  reelLambda: number;
 }
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -913,7 +914,7 @@ const SettingsTab: React.FC = () => {
     setMessage(null);
     try {
       // Only this form's fields: the SMTP card saves its own values separately
-      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key), ...SERVICE_SWITCHES.map(f => f.key), 'betaRibbon'].map(k => [k, settings[k as keyof AppSettings]]));
+      const own = Object.fromEntries([...SETTING_FIELDS.map(f => f.key), 'contactWhatsapp', ...SERVICE_COST_FIELDS.map(f => f.key), ...SERVICE_SWITCHES.map(f => f.key), 'betaRibbon', 'reelLambda'].map(k => [k, settings[k as keyof AppSettings]]));
       const d = await api<{ settings: AppSettings }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(own) });
       setSettings(d.settings);
       setMessage('تم حفظ الإعدادات');
@@ -976,6 +977,17 @@ const SettingsTab: React.FC = () => {
             <span className={`text-[11px] font-bold ${settings.betaRibbon !== 0 ? 'text-emerald-400' : 'text-slate-500'}`}>{settings.betaRibbon !== 0 ? 'ظاهر' : 'مخفي'}</span>
             <input type="checkbox" checked={settings.betaRibbon !== 0} onChange={e => setSettings({ ...settings, betaRibbon: e.target.checked ? 1 : 0 })} className="w-5 h-5 accent-emerald-500" />
           </span>
+        </label>
+        <label className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-t border-slate-700">
+          <span className="text-sm text-slate-200">☁️ تجهيز ريلز الآيات والسكينة على AWS Lambda
+            <span className="block text-[11px] text-slate-500">كل ريل على جهاز خاص فلا ينتظر أحد في الدور (حوالي سنت للريل). يحتاج إعداد AWS على الخادم.</span>
+          </span>
+          <select value={settings.reelLambda ?? 0} onChange={e => setSettings({ ...settings, reelLambda: Number(e.target.value) })}
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-200">
+            <option value={0}>لا، على الخادم فقط</option>
+            <option value={1}>عندما يكون الخادم مشغولاً</option>
+            <option value={2}>دائماً</option>
+          </select>
         </label>
       </div>
 

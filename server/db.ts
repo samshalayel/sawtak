@@ -208,6 +208,7 @@ export interface AppSettings {
   servicePayments: number;
   serviceMedical: number;
   betaRibbon: number;                // 1 = "نسخة تجريبية" ribbon on every page
+  reelLambda: number;                // calm/Quran reels on AWS Lambda: 0 = never, 1 = when this server is busy, 2 = always
   generationsPerMinute: number;      // per-user rate limit
   // USD per 1M tokens, copied from https://ai.google.dev/pricing — used only for the admin cost report
   ttsInputPricePerM: number;
@@ -246,6 +247,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   servicePayments: 1,
   serviceMedical: 1,
   betaRibbon: 1,
+  reelLambda: 0,
   contactWhatsapp: '',
   moderationMode: 'block',
   // Off until a paid key answers fast enough: on free keys the text model can take up to a minute
