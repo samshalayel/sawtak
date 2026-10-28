@@ -203,7 +203,10 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   const clickedAt = useRef(0);
   const lastEta = useRef<{ eta: number; at: number } | null>(null);
   const [error, setError] = useState<{ text: string; credits?: boolean } | null>(null);
-  const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
+  // The finished reel plays straight from the server (it streams, no wait for the whole file); the file itself is
+  // only downloaded for "تحميل" and "شارك"
+  const [result, setResult] = useState<{ url: string } | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [playing, setPlaying] = useState<string | null>(null);
   // Amiri draws the Uthmani script and its stop signs well
   const [style, setStyle] = useState(quranMode ? { ...DEFAULT_STYLE, font: 'amiri' } : DEFAULT_STYLE);
@@ -247,7 +250,6 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&family=Noto+Kufi+Arabic:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap';
     document.head.appendChild(link);
   }, []);
-  useEffect(() => () => { if (result) URL.revokeObjectURL(result.url); }, [result]);
   useEffect(() => {
     if (!busy) return;
     const tick = () => {
@@ -349,7 +351,6 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     setPercent(0);
     setSecondsLeft(null);
     setBusy(true);
-    if (result) URL.revokeObjectURL(result.url);
     setResult(null);
     try {
       const res = await fetch(quranMode ? '/api/quran/render' : '/api/calm/render', {
@@ -372,10 +373,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         if (s.status === 'queued' || s.status === 'rendering') setRenderJob({ status: s.status, progress: s.progress || 0, ahead: s.ahead || 0 });
         if (s.status === 'done') {
           setPercent(100);
-          const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
-          if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
-          const blob = await file.blob();
-          setResult({ url: URL.createObjectURL(blob), blob });
+          setResult({ url: `/api/video/jobs/${job.jobId}/file` });
           window.scrollTo({ top: 0, behavior: 'smooth' });
           break;
         }
@@ -388,10 +386,16 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   };
 
   const isPhone = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) && 'canShare' in navigator;
+  const fileName = quranMode ? 'ayat-reel' : 'sakina-reel';
   const share = async () => {
-    if (!result) return;
-    const file = new File([result.blob], quranMode ? 'ayat.mp4' : 'sakina.mp4', { type: 'video/mp4' });
-    try { await navigator.share({ files: [file], title }); } catch { /* closed */ }
+    if (!result || sharing) return;
+    setSharing(true);
+    try {
+      const blob = await fetch(result.url).then(r => { if (!r.ok) throw new Error(); return r.blob(); });
+      await navigator.share({ files: [new File([blob], `${fileName}.mp4`, { type: 'video/mp4' })], title });
+    } catch { /* closed, or the file is gone */ } finally {
+      setSharing(false);
+    }
   };
 
   const section = 'bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3';
@@ -404,13 +408,17 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
     return (
       <div className="max-w-xl mx-auto space-y-4 text-center">
         <h2 className="text-xl font-extrabold text-white">ريلك جاهز</h2>
-        <video src={result.url} controls autoPlay playsInline className="mx-auto max-h-[65vh] rounded-2xl bg-black shadow-2xl" />
+        <video src={result.url} controls autoPlay playsInline preload="auto" className="mx-auto max-h-[65vh] rounded-2xl bg-black shadow-2xl" />
         <div className="flex flex-wrap justify-center gap-2">
-          {isPhone && <button type="button" onClick={share} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-sm"><Share2 className="w-4 h-4" /> شارك</button>}
-          <a href={result.url} download={quranMode ? 'ayat-reel.mp4' : 'sakina-reel.mp4'} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-800 text-slate-100 font-bold text-sm"><Download className="w-4 h-4" /> تحميل</a>
+          {isPhone && (
+            <button type="button" onClick={share} disabled={sharing} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-sm disabled:opacity-70">
+              {sharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />} {sharing ? 'نجهّز الملف…' : 'شارك'}
+            </button>
+          )}
+          <a href={`${result.url}?download=1&name=${fileName}`} download={`${fileName}.mp4`} className="flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-800 text-slate-100 font-bold text-sm"><Download className="w-4 h-4" /> تحميل</a>
           <button type="button" onClick={() => setResult(null)} className="px-5 py-3 rounded-xl border border-slate-700 text-slate-300 text-sm">ريل جديد</button>
         </div>
-        <p className="text-[11px] text-slate-500">لا نحتفظ بنسخة، فحمّله قبل مغادرة الصفحة.</p>
+        <p className="text-[11px] text-slate-500">الريل متاح للتحميل 30 دقيقة، ولا نحتفظ بنسخة بعدها.</p>
       </div>
     );
   }

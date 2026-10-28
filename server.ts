@@ -625,12 +625,19 @@ interface VideoJob {
   reelSeconds?: number;
   estimate?: number;
   startedAt?: number;
+  /** When the job was first seen finished (done or error), for the clean-up below. */
+  finishedAt?: number;
 }
 
-// In-memory jobs; finished videos are kept 15 minutes for download, then dropped
+// In-memory jobs. A finished video is kept 30 minutes after it is ready (it plays from here and is downloaded from
+// here); jobs still waiting in line or rendering are never dropped, except anything older than 3 hours.
 const videoJobs = new Map<string, VideoJob>();
 setInterval(() => {
-  for (const [id, job] of videoJobs) if (Date.now() - job.createdAt > 15 * 60_000) videoJobs.delete(id);
+  const now = Date.now();
+  for (const [id, job] of videoJobs) {
+    if ((job.status === 'done' || job.status === 'error') && !job.finishedAt) job.finishedAt = now;
+    if ((job.finishedAt && now - job.finishedAt > 30 * 60_000) || now - job.createdAt > 3 * 3600_000) videoJobs.delete(id);
+  }
 }, 60_000).unref();
 
 app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res) => {
@@ -1263,8 +1270,22 @@ app.get('/api/video/jobs/:id/file', requireAuth, (req, res) => {
   if (!job || job.userId !== req.user!.id || job.status !== 'done' || !job.result) {
     return res.status(404).json({ success: false, error: 'الفيديو غير جاهز' });
   }
-  res.set({ 'Content-Type': 'video/mp4', 'Content-Length': String(job.result.length) });
-  res.send(job.result);
+  const file = job.result;
+  // ?download=1 saves it as a file; otherwise the page's video plays it while it streams in (byte ranges)
+  if (req.query.download) res.set('Content-Disposition', `attachment; filename="${String(req.query.name || 'reel').replace(/[^\w.-]/g, '') || 'reel'}.mp4"`);
+  res.set({ 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=1800' });
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+  if (range && (range[1] || range[2])) {
+    let start = range[1] ? Number(range[1]) : file.length - Number(range[2]);
+    let end = range[1] && range[2] ? Number(range[2]) : file.length - 1;
+    start = Math.max(0, start);
+    end = Math.min(end, file.length - 1);
+    if (start > end) return res.status(416).set('Content-Range', `bytes */${file.length}`).end();
+    res.status(206).set({ 'Content-Range': `bytes ${start}-${end}/${file.length}`, 'Content-Length': String(end - start + 1) });
+    return res.end(file.subarray(start, end + 1));
+  }
+  res.set('Content-Length', String(file.length));
+  res.end(file);
 });
 
 // Arabic Tashkeel (Diacritics) helper endpoint
