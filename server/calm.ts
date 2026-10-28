@@ -10,7 +10,7 @@ import { db } from './db.ts';
 import { enqueueRender } from './video.ts';
 import { CLIP_DIR, CLIP_TTL_MS, Clip, CalmRenderOptions, renderReel } from './calm-render.ts';
 // The renderer lives in calm-render.ts (it also runs in AWS Lambda); these are used across the server
-export { clampCalmStyle, clampSticker, verseChunks, DEFAULT_CALM_STYLE } from './calm-render.ts';
+export { clampCalmStyle, clampSticker, clampQuality, verseChunks, DEFAULT_CALM_STYLE } from './calm-render.ts';
 export type { Clip, CalmRenderOptions, CalmStyle } from './calm-render.ts';
 
 const PIXABAY = 'https://pixabay.com/api/videos/';

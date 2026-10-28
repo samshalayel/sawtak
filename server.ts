@@ -31,7 +31,7 @@ const { createMotionRouter } = await import('./server/motion.ts');
 const { renderPressVideo } = await import('./server/press-video.ts');
 const { newUploadPath, uploadPath, probeVideo, renderOverlayVideo, isOverlayFont, OVERLAY_MAX_SECONDS, OVERLAY_MAX_BYTES } = await import('./server/press-overlay.ts');
 const { createWriteStream } = await import('fs');
-const { calmRouter, renderCalmReel, vettedClip, vetClips, clampCalmStyle, clampSticker } = await import('./server/calm.ts');
+const { calmRouter, renderCalmReel, vettedClip, vetClips, clampCalmStyle, clampSticker, clampQuality } = await import('./server/calm.ts');
 const { quranRouter, parseQuranPick, quranRecitation, QuranTooLongError } = await import('./server/quran.ts');
 const { QURAN_RECITERS } = await import('./src/data/quran.ts');
 const { logQuranReel, finishQuranReel, refundQuranReel, recoverInterruptedQuranReels } = await import('./server/quran-stats.ts');
@@ -1146,7 +1146,7 @@ app.post('/api/quran/render', requireAuth, requireVerifiedEmail, async (req, res
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
   startCalmRender(job, {
-    clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, info, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+    clips: clips as any, voice: recitation.wav, verses: recitation.captions, text, title, info, dedication, supportCard, style: clampCalmStyle(body.style), sticker, quality: clampQuality(body.quality), domain: watermarkDomain(req.hostname),
   }, (ok, renderSeconds, error) => {
     finishQuranReel(logId, ok, renderSeconds, error);
     // Nothing to show for the points: they go back to the user
@@ -1211,7 +1211,7 @@ app.post('/api/calm/render', requireAuth, requireVerifiedEmail, async (req, res)
   const job: VideoJob = { id: crypto.randomBytes(12).toString('base64url'), userId: req.user!.id, status: 'queued', progress: 0, createdAt: Date.now() };
   videoJobs.set(job.id, job);
   startCalmRender(job, {
-    clips: clips as any, voice: wav, text, title, dedication, supportCard, style: clampCalmStyle(body.style), sticker, domain: watermarkDomain(req.hostname),
+    clips: clips as any, voice: wav, text, title, dedication, supportCard, style: clampCalmStyle(body.style), sticker, quality: clampQuality(body.quality), domain: watermarkDomain(req.hostname),
   });
   res.status(202).json({ success: true, jobId: job.id, balance });
 });

@@ -15,7 +15,18 @@ const FONTS_DIR = path.resolve('fonts'); // calligraphy faces for the day sticke
 const W = 720;
 const H = 1280;
 const FADE = 1.2; // seconds of cross-fade between scenes
-const FPS = 25;   // slow calm footage looks the same as at 30, and each reel renders faster
+
+/**
+ * What a reel costs to make and to send: «standard» is 720x1280 at 25 fps (slow calm footage looks the same as at 30,
+ * and each reel renders faster); «light» is scaled to 540x960 at the very end (after the captions are drawn at 720,
+ * so the layout is the same), 20 fps and a higher CRF: a file about half the size that reaches a phone sooner.
+ */
+export type ReelQuality = 'standard' | 'light';
+const PROFILES: Record<ReelQuality, { width: number; height: number; fps: number; crf: number; maxrate: string; bufsize: string }> = {
+  standard: { width: W, height: H, fps: 25, crf: 28, maxrate: '2M', bufsize: '4M' },
+  light: { width: 540, height: 960, fps: 20, crf: 31, maxrate: '1M', bufsize: '2M' },
+};
+export const clampQuality = (raw: unknown): ReelQuality => (raw === 'light' ? 'light' : 'standard');
 
 export interface Clip { id: number; duration: number; tags: string; thumb: string; preview: string; url: string; width: number; height: number }
 
@@ -50,6 +61,8 @@ export interface CalmRenderOptions {
   domain: string;
   style?: CalmStyle;
   sticker?: CalmSticker | null;
+  /** Size and weight of the MP4 (default standard). */
+  quality?: ReelQuality;
   onProgress?: (f: number) => void;
   onStart?: () => void;
 }
@@ -271,6 +284,7 @@ async function brandStrip(b: NonNullable<CalmRenderOptions['brand']>) {
 }
 
 export async function renderReel(o: CalmRenderOptions): Promise<Buffer> {
+  const q = PROFILES[clampQuality(o.quality)];
   const voiceStart = 1.2;
   const voiceLen = speechIntervals(o.voice).duration;
   const voiceEnd = voiceStart + voiceLen;
@@ -319,7 +333,7 @@ export async function renderReel(o: CalmRenderOptions): Promise<Buffer> {
       await fs.writeFile(path.join(dir, `t${k}.png`), t.png);
       pictures.push({ file: `t${k}.png`, x: t.x, y: t.y, start: t.start, end: t.end, fade: t.fade, fadeOut: true });
     }
-    const iconInput = pictures.flatMap(p => ['-framerate', String(FPS), '-loop', '1', '-t', (p.end - p.start).toFixed(2), '-i', p.file]);
+    const iconInput = pictures.flatMap(p => ['-framerate', String(q.fps), '-loop', '1', '-t', (p.end - p.start).toFixed(2), '-i', p.file]);
     const iconFilter = pictures.map((p, j) => {
       const len = p.end - p.start;
       const fade = Math.min(p.fade, len / 2);
@@ -330,7 +344,7 @@ export async function renderReel(o: CalmRenderOptions): Promise<Buffer> {
     const inputs = segments.flatMap(s => ['-t', s.len.toFixed(2), '-i', s.file]);
     const voiceIdx = segments.length;
     const prep = segments.map((s, i) =>
-      `[${i}:v]trim=0:${s.len.toFixed(2)},setpts=PTS-STARTPTS,fps=${FPS},crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=${W}:${H},format=yuv420p,eq=brightness=-0.1:saturation=1.05,setsar=1[s${i}]`);
+      `[${i}:v]trim=0:${s.len.toFixed(2)},setpts=PTS-STARTPTS,fps=${q.fps},crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=${W}:${H},format=yuv420p,eq=brightness=-0.1:saturation=1.05,setsar=1[s${i}]`);
     const fades: string[] = [];
     let last = 's0';
     let offset = segments[0].len - FADE;
@@ -342,7 +356,7 @@ export async function renderReel(o: CalmRenderOptions): Promise<Buffer> {
     const filter = [
       ...prep,
       ...fades,
-      `[${last}]trim=0:${total},setpts=PTS-STARTPTS${iconFilter},fade=t=in:st=0:d=1,fade=t=out:st=${(total - 1.2).toFixed(2)}:d=1.2,subtitles=subs.ass:fontsdir=${FONTS_DIR.replace(/\\/g, '/').replace(/:/g, '\\\\:')}[vout]`,
+      `[${last}]trim=0:${total},setpts=PTS-STARTPTS${iconFilter},fade=t=in:st=0:d=1,fade=t=out:st=${(total - 1.2).toFixed(2)}:d=1.2,subtitles=subs.ass:fontsdir=${FONTS_DIR.replace(/\\/g, '/').replace(/:/g, '\\\\:')}${q.width === W ? '' : `,scale=${q.width}:${q.height}:flags=bicubic`}[vout]`,
       // Voice starts after a breath of silence; the soundtrack fades out with the picture
       `[${voiceIdx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay=${Math.round(voiceStart * 1000)}|${Math.round(voiceStart * 1000)},apad,atrim=0:${total},afade=t=out:st=${(total - 1).toFixed(2)}:d=1[aout]`,
     ].join(';');
@@ -354,7 +368,7 @@ export async function renderReel(o: CalmRenderOptions): Promise<Buffer> {
       ...inputs, '-i', 'voice.wav', ...iconInput,
       '-filter_complex', filter,
       '-map', '[vout]', '-map', '[aout]',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-maxrate', '2M', '-bufsize', '4M', '-r', String(FPS), '-pix_fmt', 'yuv420p',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(q.crf), '-maxrate', q.maxrate, '-bufsize', q.bufsize, '-r', String(q.fps), '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-t', String(total), '-movflags', '+faststart', 'out.mp4',
     ], dir, { timeoutMs: renderTimeoutMs(total) * 3, duration: total, onProgress: o.onProgress });
     return await fs.readFile(path.join(dir, 'out.mp4'));

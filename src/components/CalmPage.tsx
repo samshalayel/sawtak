@@ -193,6 +193,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
   // Shown for the whole reel, e.g. "عن روح المرحوم ..."
   const [dedication, setDedication] = useState('');
   const [showReciter, setShowReciter] = useState(true);
+  const [quality, setQuality] = useState<'standard' | 'light'>('standard');
   const [support, setSupport] = useState(DEFAULT_SUPPORT);
   const [busy, setBusy] = useState(false);
   // While a reel is made: the job's state from the server, and the pop-up's percentage and time left. The percentage
@@ -358,7 +359,7 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(quranMode && quran ? { quran: { surah: quran.surah, start: quran.start, end: quran.end, reciter: quran.reciter } } : { text, voiceId }),
-          title, clipIds: chosen.map(c => c.id), supportCard: supportOn ? support : '', dedication: dedication.trim(), style, sticker,
+          title, clipIds: chosen.map(c => c.id), supportCard: supportOn ? support : '', dedication: dedication.trim(), style, sticker, quality,
           ...(quranMode ? { showReciter } : {}),
         }),
       });
@@ -805,6 +806,18 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
               </label>
               {supportOn && <textarea value={support} onChange={e => setSupport(e.target.value.slice(0, 200))} rows={2} className={`${input} leading-relaxed`} />}
               {!quranMode && <p className="text-[11px] text-slate-500">يمكنك إضافة رقم خط دعم نفسي محلي موثوق، بعد التأكد منه من مصدر رسمي.</p>}
+              <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                <div className="text-xs text-slate-300">جودة الفيديو</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([['standard', 'عالية', '720p · أوضح'], ['light', 'خفيفة', '540p · أصغر وأسرع تحميلاً']] as const).map(([id, name, hint]) => (
+                    <button key={id} type="button" onClick={() => setQuality(id)}
+                      className={`rounded-xl border px-3 py-2 text-right ${quality === id ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                      <div className="text-sm font-bold">{name}</div>
+                      <div className="text-[11px] text-slate-500">{hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
           {error && (
