@@ -28,6 +28,22 @@ const clients = () => {
   return { lambda, s3 };
 };
 
+// The account's concurrency is used up: the function never started, so asking again a little later is safe
+const THROTTLE_RETRY_MS = [2000, 5000, 10_000, 20_000];
+const isThrottled = (e: any) => e?.name === 'TooManyRequestsException' || e?.$metadata?.httpStatusCode === 429;
+
+/** Invokes the function, waiting for a free slot (with some jitter) when Lambda is at its concurrency limit. */
+async function invoke(lambda: LambdaClient, job: ReelJob) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await lambda.send(new InvokeCommand({ FunctionName: FUNCTION, Payload: Buffer.from(JSON.stringify(job)) }));
+    } catch (error) {
+      if (!isThrottled(error) || attempt >= THROTTLE_RETRY_MS.length) throw error;
+      await new Promise(r => setTimeout(r, THROTTLE_RETRY_MS[attempt] * (0.75 + Math.random() * 0.5)));
+    }
+  }
+}
+
 /** Renders on Lambda; resolves with the S3 key of the MP4. Throws on any failure (the caller renders locally). */
 export async function renderOnLambda(jobId: string, o: CalmRenderOptions): Promise<{ key: string } & ReelResult> {
   const { lambda, s3 } = clients();
@@ -36,7 +52,7 @@ export async function renderOnLambda(jobId: string, o: CalmRenderOptions): Promi
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: voiceKey, Body: o.voice, ContentType: 'audio/wav' }));
   const { voice: _voice, brand: _brand, onProgress: _p, onStart: _s, ...options } = o;
   const job: ReelJob = { voiceKey, outKey, options };
-  const res = await lambda.send(new InvokeCommand({ FunctionName: FUNCTION, Payload: Buffer.from(JSON.stringify(job)) }));
+  const res = await invoke(lambda, job);
   const answer = res.Payload ? JSON.parse(Buffer.from(res.Payload).toString('utf8')) : null;
   if (res.FunctionError || !answer?.bytes) throw new Error(`Lambda reel failed: ${answer?.errorMessage || res.FunctionError || 'no answer'}`);
   return { key: outKey, ...(answer as ReelResult) };

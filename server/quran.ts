@@ -115,6 +115,19 @@ export interface QuranRecitation {
   seconds: number;
 }
 
+/** Maps `items` with at most `limit` calls in flight; the results keep the order of `items`. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+
 /** The passage as one WAV (verses joined with a short pause) and the exact time span of each verse. */
 export async function quranRecitation(p: QuranPick): Promise<QuranRecitation> {
   const [text, surahs] = await Promise.all([surahText(p.surah), quranSurahs()]);
@@ -122,8 +135,11 @@ export async function quranRecitation(p: QuranPick): Promise<QuranRecitation> {
   const parts: Buffer[] = [];
   const captions: QuranRecitation['captions'] = [];
   let t = 0;
-  for (let v = p.start; v <= p.end; v++) {
-    const pcm = await decodePcm(await verseAudio(p.reciter, p.surah, v));
+  // Downloads and decoding of the verses run side by side (4 at a time); the timeline is then laid out in order
+  const verses = Array.from({ length: p.end - p.start + 1 }, (_, i) => p.start + i);
+  const pcms = await mapLimit(verses, 4, async v => decodePcm(await verseAudio(p.reciter, p.surah, v)));
+  for (const [i, v] of verses.entries()) {
+    const pcm = pcms[i];
     if (parts.length) { parts.push(gap); t += GAP_SECONDS; }
     const seconds = pcm.length / 2 / RATE;
     captions.push({ text: text[v - 1], start: t, end: t + seconds });
