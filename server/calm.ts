@@ -12,6 +12,7 @@ import { CALM_FONTS } from '../src/data/calmFonts.ts';
 import { textPng } from './calm-text.ts';
 import { STICKER_ICONS, STICKER_THEMES, STICKER_LOOKS, CalmSticker, stickerLayout, DAY_ART, DECOR_GRADIENT } from '../src/data/calmStickers.ts';
 import { requireAuth, requireVerifiedEmail } from './auth.ts';
+import { db } from './db.ts';
 import { assTime, assText, runFfmpeg, enqueueRender, renderTimeoutMs, watermarkFor, speechIntervals, captionChunks } from './video.ts';
 
 const PIXABAY = 'https://pixabay.com/api/videos/';
@@ -33,7 +34,6 @@ export const CALM_SCENES: Record<string, string> = {
   sunrise: 'sunrise morning light',
   countryside: 'countryside road fields',
   mountains: 'mountains landscape',
-  europe: 'european village landscape',
   river: 'river stream water nature',
   snow: 'snow winter landscape',
   flowers: 'flowers meadow',
@@ -463,3 +463,57 @@ calmRouter.get('/search', async (req, res) => {
 
 /** Only clips that came from our own (filtered) searches can be rendered. */
 export const vettedClip = (id: number) => clipIndex.get(id) ?? null;
+
+/**
+ * Clips for a render, in order. One not seen in a search since the server started (a starred scene, or the search
+ * cache expired) is looked up on Pixabay by id and goes through the same calm filter.
+ */
+export async function vetClips(ids: number[]): Promise<Clip[]> {
+  const key = process.env.PIXABAY_API_KEY;
+  const out: Clip[] = [];
+  for (const id of ids) {
+    let clip = clipIndex.get(id) ?? null;
+    if (!clip && key && Number.isInteger(id) && id > 0) {
+      try {
+        const res = await fetch(`${PIXABAY}?key=${encodeURIComponent(key)}&id=${id}`, { signal: AbortSignal.timeout(15_000) });
+        const h = res.ok ? (await res.json()).hits?.[0] : null;
+        if (h && isCalm(String(h.tags || '')) && h.duration >= 5) {
+          const v = h.videos ?? {};
+          const src = v.small?.url ? v.small : v.medium?.url ? v.medium : v.tiny;
+          if (src?.url) {
+            clip = { id: h.id, duration: h.duration, tags: String(h.tags || ''), thumb: v.tiny?.thumbnail || '', preview: v.tiny?.url || src.url, url: src.url, width: src.width, height: src.height };
+            clipIndex.set(clip.id, clip);
+          }
+        }
+      } catch { /* left out */ }
+    }
+    if (clip) out.push(clip);
+  }
+  return out;
+}
+
+// ---------- Starred scenes (settings, not content) ----------
+
+interface FavoriteClip { id: number; duration: number; thumb: string; preview: string; scene: string }
+const PIXABAY_CDN = /^https:\/\/cdn\.pixabay\.com\//;
+
+calmRouter.get('/favorites', (req, res) => {
+  let clips: FavoriteClip[] = [];
+  try { clips = JSON.parse((db.prepare('SELECT favorite_clips FROM users WHERE id = ?').get(req.user!.id) as { favorite_clips: string }).favorite_clips); } catch { /* none */ }
+  res.json({ success: true, clips: Array.isArray(clips) ? clips : [] });
+});
+
+/** Replaced as a whole list; only Pixabay's own media addresses are kept. */
+calmRouter.put('/favorites', (req, res) => {
+  const seen = new Set<number>();
+  const clips: FavoriteClip[] = (Array.isArray(req.body?.clips) ? req.body.clips : []).flatMap((c: any) => {
+    const id = Number(c?.id);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return [];
+    const thumb = String(c?.thumb || ''), preview = String(c?.preview || '');
+    if ((thumb && !PIXABAY_CDN.test(thumb)) || !PIXABAY_CDN.test(preview)) return [];
+    seen.add(id);
+    return [{ id, duration: Math.max(0, Math.min(600, Number(c?.duration) || 0)), thumb, preview, scene: CALM_SCENES[c?.scene] ? String(c.scene) : '' }];
+  }).slice(0, 60);
+  db.prepare('UPDATE users SET favorite_clips = ? WHERE id = ?').run(JSON.stringify(clips), req.user!.id);
+  res.json({ success: true, clips });
+});

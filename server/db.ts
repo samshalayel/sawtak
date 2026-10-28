@@ -112,6 +112,10 @@ if (!hasColumn('users', 'terms_accepted_at')) {
 if (!hasColumn('users', 'favorite_voices')) {
   db.exec("ALTER TABLE users ADD COLUMN favorite_voices TEXT NOT NULL DEFAULT '[]'");
 }
+// Starred reel scenes (JSON array of {id, duration, thumb, preview, scene}), shown first when picking scenes
+if (!hasColumn('users', 'favorite_clips')) {
+  db.exec("ALTER TABLE users ADD COLUMN favorite_clips TEXT NOT NULL DEFAULT '[]'");
+}
 // Feature permissions an admin grants to a normal account (JSON array, e.g. ["motion"]), so testers can use a tool
 // without seeing the admin dashboard (keys, money, moderation lists)
 if (!hasColumn('users', 'permissions')) {

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, Minus, Pause, Plus, Volume2 } from 'lucide-react';
+import { BookOpen, Loader2, Minus, Pause, Plus, Sparkles, Volume2 } from 'lucide-react';
 import { QURAN_MAX_VERSES, QuranReciter, QuranTopic } from '../data/quran';
 
-// Verse picker for Quran reels (first step of the Quran page): choose a passage by theme or by surah and verse
-// numbers, listen to the reciter, then use it. The reel plays the reciter's own recitation of these whole verses.
+// Verse picker for Quran reels (first step of the Quran page): two big choices — ready passages by theme, or a
+// surah and verse numbers — then the passage, listen to the reciter, and use it. The reel plays the reciter's own recitation of these whole verses.
 
 export interface QuranChoice {
   surah: number;
@@ -16,8 +16,11 @@ export interface QuranChoice {
 
 interface Surah { number: number; name: string; verses: number }
 
-const chip = (active: boolean) => `px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${active ? 'bg-emerald-500/15 border-emerald-500/70 text-emerald-200' : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700'}`;
 const input = 'w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500';
+// Larger buttons for the passage levels (theme, then passage), in each choice's colour
+const big = (active: boolean, tone: 'emerald' | 'indigo') => `px-4 py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${active
+  ? tone === 'emerald' ? 'bg-emerald-500 border-emerald-500 text-slate-950' : 'bg-[#4f46e5] border-[#4f46e5] text-[#ffffff]'
+  : tone === 'emerald' ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-200 hover:border-emerald-500/60' : 'bg-[#4f46e5]/5 border-[#4f46e5]/30 text-[#4338ca] hover:border-[#4f46e5]/60'}`;
 const stepButton = 'shrink-0 w-10 rounded-xl bg-slate-800 text-slate-100 flex items-center justify-center hover:bg-slate-700 active:bg-slate-600 disabled:opacity-40 touch-manipulation';
 
 /** Arabic-Indic and Persian digits (phone keyboards) to 0-9, anything else dropped. */
@@ -60,7 +63,8 @@ export const QuranPicker: React.FC<{
   /** Back to the passage already chosen (shown only when there is one). */
   onCancel?: () => void;
 }> = ({ reciter, onReciter, onPick, onCancel }) => {
-  const [mode, setMode] = useState<'topic' | 'surah'>('topic');
+  // Nothing chosen at first: the two big buttons lead
+  const [mode, setMode] = useState<'topic' | 'surah' | null>(null);
   const [surahs, setSurahs] = useState<Surah[]>([]);
   const [reciters, setReciters] = useState<QuranReciter[]>([]);
   const [topics, setTopics] = useState<QuranTopic[]>([]);
@@ -126,23 +130,39 @@ export const QuranPicker: React.FC<{
         </select>
       </div>
 
-      <div className="flex gap-2">
-        <button type="button" onClick={() => setMode('topic')} className={chip(mode === 'topic')}>حسب الموضوع</button>
-        <button type="button" onClick={() => setMode('surah')} className={chip(mode === 'surah')}>من سورة</button>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" onClick={() => { setMode('topic'); setPreview(null); }} aria-pressed={mode === 'topic'}
+          className={`rounded-2xl p-4 text-right border-2 transition-all ${mode === 'topic' ? 'bg-emerald-500 border-emerald-500 text-slate-950 shadow-lg' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200 hover:border-emerald-500'} ${mode === 'surah' ? 'opacity-60' : ''}`}>
+          <Sparkles className="w-6 h-6 mb-1.5" />
+          <div className="text-base font-extrabold">آيات جاهزة</div>
+          <div className={`text-[11px] ${mode === 'topic' ? 'text-slate-900/80' : 'text-slate-400'}`}>مختارة حسب الموضوع</div>
+        </button>
+        <button type="button" onClick={() => { setMode('surah'); setPreview(null); }} aria-pressed={mode === 'surah'}
+          className={`rounded-2xl p-4 text-right border-2 transition-all ${mode === 'surah' ? 'bg-[#4f46e5] border-[#4f46e5] text-[#ffffff] shadow-lg' : 'bg-[#4f46e5]/10 border-[#4f46e5]/40 text-[#4338ca] hover:border-[#4f46e5]'} ${mode === 'topic' ? 'opacity-60' : ''}`}>
+          <BookOpen className="w-6 h-6 mb-1.5" />
+          <div className="text-base font-extrabold">من السور</div>
+          <div className={`text-[11px] ${mode === 'surah' ? 'text-[#ffffff]/80' : 'text-slate-400'}`}>اختر السورة والآيات</div>
+        </button>
       </div>
 
-      {mode === 'topic' ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            {topics.map(t => <button key={t.id} type="button" onClick={() => setTopicId(t.id)} className={chip(topicId === t.id)}>{t.label}</button>)}
+      {mode === null ? null : mode === 'topic' ? (
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="text-xs font-bold text-slate-300">الموضوع</div>
+            <div className="flex flex-wrap gap-2">
+              {topics.map(t => <button key={t.id} type="button" onClick={() => { setTopicId(t.id); setPreview(null); }} className={big(topicId === t.id, 'emerald')}>{t.label}</button>)}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {topic?.verses.map(v => (
-              <button key={`${v.surah}:${v.start}`} type="button" onClick={() => load(v.surah, v.start, v.end)}
-                className={chip(preview?.surah === v.surah && preview.start === v.start && preview.end === v.end)}>
-                {v.label}
-              </button>
-            ))}
+          <div className="space-y-2">
+            <div className="text-xs font-bold text-slate-300">المقطع</div>
+            <div className="flex flex-wrap gap-2">
+              {topic?.verses.map(v => (
+                <button key={`${v.surah}:${v.start}`} type="button" onClick={() => load(v.surah, v.start, v.end)}
+                  className={big(preview?.surah === v.surah && preview.start === v.start && preview.end === v.end, 'emerald')}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       ) : (
