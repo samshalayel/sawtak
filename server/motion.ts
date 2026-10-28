@@ -24,7 +24,7 @@ export interface MotionDeps {
   textModel: string;
   dialectNames: Record<string, string>;
   voices: { id: string }[];
-  synthesizeSpeech: (text: string, voice: string, style: string) => Promise<{ response: any; keyId: number; wav: Buffer | null }>;
+  synthesizeSpeech: (text: string, voice: string, style: string) => Promise<{ response: any; keyId: number | undefined; wav: Buffer | null }>;
   buildStyleDirective: (o: { dialect?: string; toneStyle?: string; customStylePrompt?: string; speed?: number; pitch?: number }) => string;
   usageTokens: (response: any) => { promptTokens: number; outputTokens: number };
   passesModeration: (req: express.Request, res: express.Response, text: string, feature: string) => Promise<boolean>;

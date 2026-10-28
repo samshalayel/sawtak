@@ -17,6 +17,7 @@ const {
   InsufficientCreditsError, AUDIO_TOKENS_PER_SECOND, estimateCredits, pointsText, chargePoints
 } = await import('./server/credits.ts');
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
+const { elevenLabsEnabled, synthesizeElevenLabs } = await import('./server/tts-elevenlabs.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
 const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
@@ -266,8 +267,20 @@ function buildStyleDirective({ dialect = 'msa', toneStyle = 'professional_news',
   ].filter(Boolean).join('. ');
 }
 
-/** One single-voice Gemini TTS call (failing over across API keys). `wav` is null when no audio came back. */
-async function synthesizeSpeech(text: string, voice: string, style: string) {
+/**
+ * One single-voice speech call: ElevenLabs when TTS_PROVIDER=elevenlabs (Gemini takes over if that fails and Gemini
+ * keys are set), otherwise Gemini TTS failing over across API keys. `wav` is null when no audio came back.
+ */
+async function synthesizeSpeech(text: string, voice: string, style: string): Promise<{ response: any; keyId: number | undefined; wav: Buffer | null }> {
+  if (elevenLabsEnabled()) {
+    try {
+      // No usage metadata here: the callers bill by the seconds of audio, as they do for Gemini
+      return { response: { usageMetadata: {} }, keyId: undefined, wav: await synthesizeElevenLabs(text, voice, style) };
+    } catch (error: any) {
+      if (!hasUsableKeys()) throw error;
+      console.error('ElevenLabs failed, using Gemini:', error?.message || error);
+    }
+  }
   const { result: response, keyId } = await withGeminiFailover('tts', client => client.models.generateContent({
     model: TTS_MODEL,
     contents: [{ role: 'user', parts: [{ text, speechMetadata: { style } }] }],
@@ -320,7 +333,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
       return res.status(400).json({ success: false, error: 'الصوت المختار غير متاح' });
     }
 
-    if (!hasUsableKeys()) {
+    if (!elevenLabsEnabled() && !hasUsableKeys()) {
       return res.status(500).json({
         success: false,
         error: GENERIC_MESSAGE

@@ -55,7 +55,7 @@ export interface BatchDeps {
   voices: string[];
   ttsModel: string;
   buildStyle: (opts: { dialect: string; toneStyle: string; customStylePrompt: string }) => string;
-  synthesize: (text: string, voice: string, style: string) => Promise<{ response: any; keyId: number; wav: Buffer | null }>;
+  synthesize: (text: string, voice: string, style: string) => Promise<{ response: any; keyId: number | undefined; wav: Buffer | null }>;
   usageTokens: (response: any) => { promptTokens: number; outputTokens: number };
   passesModeration: (req: express.Request, res: express.Response, text: string, feature: string) => Promise<boolean>;
   watermarkDomain: (host: string) => string;
