@@ -8,6 +8,8 @@
 set -eu
 
 REGION=${REGION:-eu-central-1}
+# 10240 MB = 6 vCPU; new accounts are capped at 3008 MB (about 2 vCPU) until AWS raises the limit
+MEMORY=${MEMORY:-10240}
 NAME=sawtik-reel-render
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -33,9 +35,11 @@ aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-conf
 
 # ---------- Image: build here, push to ECR ----------
 aws ecr describe-repositories --repository-names "$NAME" >/dev/null 2>&1 || aws ecr create-repository --repository-name "$NAME" >/dev/null
-docker build -f lambda/reel/Dockerfile -t "$IMAGE" .
+# Lambda takes a plain single-platform image (no provenance attestation)
+docker build --provenance=false --platform linux/amd64 -f lambda/reel/Dockerfile -t "$IMAGE" .
 aws ecr get-login-password | docker login --username AWS --password-stdin "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
 docker push "$IMAGE"
+docker logout "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com" >/dev/null
 
 # ---------- Role the function runs as: logs, and reels/ in the bucket ----------
 cat > "$WORK/trust.json" <<EOF
@@ -52,12 +56,14 @@ aws iam get-role --role-name "$NAME-role" >/dev/null 2>&1 || {
 aws iam put-role-policy --role-name "$NAME-role" --policy-name reels-bucket --policy-document file:///aws/bucket.json
 ROLE_ARN="arn:aws:iam::$ACCOUNT:role/$NAME-role"
 
-# ---------- Function: 10 GB (6 vCPU), 15 minutes, 2 GB of /tmp ----------
+# ---------- Function: MEMORY (10 GB = 6 vCPU), 15 minutes, 2 GB of /tmp ----------
 if aws lambda get-function --function-name "$NAME" >/dev/null 2>&1; then
   aws lambda update-function-code --function-name "$NAME" --image-uri "$IMAGE" >/dev/null
+  aws lambda wait function-updated-v2 --function-name "$NAME"
+  aws lambda update-function-configuration --function-name "$NAME" --memory-size "$MEMORY" >/dev/null
 else
   aws lambda create-function --function-name "$NAME" --package-type Image --code "ImageUri=$IMAGE" --role "$ROLE_ARN" \
-    --memory-size 10240 --timeout 900 --ephemeral-storage Size=2048 --architectures x86_64 \
+    --memory-size "$MEMORY" --timeout 900 --ephemeral-storage Size=2048 --architectures x86_64 \
     --environment "Variables={REEL_BUCKET=$BUCKET}" >/dev/null
 fi
 aws lambda wait function-updated-v2 --function-name "$NAME" 2>/dev/null || aws lambda wait function-active-v2 --function-name "$NAME"
