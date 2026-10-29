@@ -18,6 +18,7 @@ const {
 } = await import('./server/credits.ts');
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { elevenLabsEnabled, synthesizeElevenLabs } = await import('./server/tts-elevenlabs.ts');
+const { openRouterEnabled, synthesizeOpenRouter } = await import('./server/tts-openrouter.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
 const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
@@ -268,8 +269,9 @@ function buildStyleDirective({ dialect = 'msa', toneStyle = 'professional_news',
 }
 
 /**
- * One single-voice speech call: ElevenLabs when TTS_PROVIDER=elevenlabs (Gemini takes over if that fails and Gemini
- * keys are set), otherwise Gemini TTS failing over across API keys. `wav` is null when no audio came back.
+ * One single-voice speech call: ElevenLabs when TTS_PROVIDER=elevenlabs, or Gemini TTS through OpenRouter when it is
+ * openrouter (Gemini takes over if that fails and Gemini keys are set), otherwise Gemini TTS failing over across API
+ * keys. `wav` is null when no audio came back.
  */
 async function synthesizeSpeech(text: string, voice: string, style: string): Promise<{ response: any; keyId: number | undefined; wav: Buffer | null }> {
   if (elevenLabsEnabled()) {
@@ -279,6 +281,14 @@ async function synthesizeSpeech(text: string, voice: string, style: string): Pro
     } catch (error: any) {
       if (!hasUsableKeys()) throw error;
       console.error('ElevenLabs failed, using Gemini:', error?.message || error);
+    }
+  }
+  if (openRouterEnabled()) {
+    try {
+      return { response: { usageMetadata: {} }, keyId: undefined, wav: await synthesizeOpenRouter(text, voice, style) };
+    } catch (error: any) {
+      if (!hasUsableKeys()) throw error;
+      console.error('OpenRouter failed, using Gemini:', error?.message || error);
     }
   }
   const { result: response, keyId } = await withGeminiFailover('tts', client => client.models.generateContent({
@@ -333,7 +343,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
       return res.status(400).json({ success: false, error: 'الصوت المختار غير متاح' });
     }
 
-    if (!elevenLabsEnabled() && !hasUsableKeys()) {
+    if (!elevenLabsEnabled() && !openRouterEnabled() && !hasUsableKeys()) {
       return res.status(500).json({
         success: false,
         error: GENERIC_MESSAGE

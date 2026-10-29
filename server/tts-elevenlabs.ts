@@ -101,11 +101,12 @@ function decodePcm(mp3: Buffer): Promise<Buffer> {
   });
 }
 
-function wavFromPcm(pcm: Buffer): Buffer {
+/** 16-bit mono PCM in a WAV header (24 kHz unless said otherwise). */
+export function wavFromPcm(pcm: Buffer, rate = RATE): Buffer {
   const h = Buffer.alloc(44);
   h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8);
   h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
-  h.writeUInt32LE(RATE, 24); h.writeUInt32LE(RATE * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
   h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
   return Buffer.concat([h, pcm]);
 }
