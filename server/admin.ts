@@ -7,6 +7,7 @@ import { sendTestEmail } from './mailer.ts';
 import { requireAdmin, requireAuth } from './auth.ts';
 import { customVoicesRouter } from './custom-voices.ts';
 import { quranReelStats } from './quran-stats.ts';
+import { openRouterStats } from './openrouter-stats.ts';
 
 export const adminRouter = express.Router();
 adminRouter.use(requireAuth, requireAdmin);
@@ -233,6 +234,15 @@ adminRouter.post('/smtp/test', async (req, res) => {
 // ---------- Gemini API keys ----------
 
 const TTS_TEST_MODEL = 'gemini-3.8-flash-lite-tts';
+
+adminRouter.get('/openrouter', async (_req, res) => {
+  try {
+    res.json({ success: true, stats: await openRouterStats() });
+  } catch (error: any) {
+    console.error('OpenRouter stats failed:', error?.message || error);
+    res.status(502).json({ success: false, error: 'تعذّر جلب بيانات OpenRouter حالياً' });
+  }
+});
 
 adminRouter.get('/keys', (_req, res) => {
   const rows = db.prepare(`

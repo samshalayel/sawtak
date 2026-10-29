@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import { api, card, date, num, td, th, usd } from './adminShared';
 import { usePaged } from './Pager';
+import { OpenRouterCard } from './OpenRouterCard';
 
 interface ApiKeyInfo {
   id: number;
@@ -94,6 +95,7 @@ export const KeysTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      <OpenRouterCard />
       <div className={`${card} text-xs text-slate-400 leading-relaxed`}>
         يستخدم النظام المفاتيح <b className="text-slate-200">بالترتيب من الأعلى</b>. إذا انتهت حصة مفتاح أو لم يستجب أو كان غير صالح،
         يُوقَف مؤقتاً وينتقل الطلب <b className="text-slate-200">تلقائياً</b> إلى المفتاح التالي، ولا تظهر للعميل رسالة
