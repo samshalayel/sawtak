@@ -411,6 +411,7 @@ export default function App() {
         title: (mode === 'dialogue' ? `حوار ${speakerNames.join(' و ')}: ` : '') + spokenText.slice(0, 32) + (spokenText.length > 32 ? '...' : ''),
         audioUrl: blobUrl,
         audioBase64: data.audioBase64,
+        audioId: data.audioId,
         voice: cloneVoice ? cloneVoice.id : mode === 'single' ? selectedVoice.id : speakers.map(s => s.voiceId).join('+'),
         voiceName: cloneVoice ? `${cloneVoice.name} (نسخة أسلوب العينة)` : mode === 'single' ? selectedVoice.name : speakerVoices.join(' و '),
         language: currentLang.nameAr,
@@ -530,6 +531,7 @@ export default function App() {
   const videoSource = playingItem?.audioBase64
     ? {
         audioBase64: playingItem.audioBase64,
+        audioId: playingItem.audioId,
         voiceId: playingItem.voice,
         // Dialogue scripts carry "Name: line" prefixes; captions show only what is spoken
         text: playingItem.voice.includes('+')
@@ -1076,6 +1078,7 @@ export default function App() {
       {showVideoMaker && videoSource && (
         <VideoMakerModal
           audioBase64={videoSource.audioBase64}
+          audioId={videoSource.audioId}
           text={videoSource.text}
           voiceId={videoSource.voiceId}
           voiceAvatar={VOICES.find(v => v.id === videoSource.voiceId.split('+')[0])?.avatar}

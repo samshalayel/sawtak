@@ -7,6 +7,7 @@ import {
 import { VOICES } from '../data/presets';
 import { AuthUser } from '../types/auth';
 import { base64ToBlobUrl, estimateDuration } from '../utils/audio';
+import { postRender } from '../utils/postRender';
 import { BrandKit, BrandKitPanel } from './BrandKitPanel';
 import { FootageBrander } from './FootageBrander';
 
@@ -186,15 +187,11 @@ export const PressPage: React.FC<Props> = ({ user, onLoginRequired, onBalance, o
 
       // 3. Branded video (free), rendered in the background
       setStage('video');
-      const vRes = await fetch('/api/press/video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          speechBase64: tts.audioBase64, format: videoFormat,
-          episodeTitle: title.trim(), lines, headlines: format === 'bulletin' ? headlines : [],
-          speakers: speakerNames.map((name, i) => ({ name, voiceId: voices[i], imageBase64: photos[i] ?? undefined })),
-        }),
-      });
+      const vRes = await postRender('/api/press/video', {
+        format: videoFormat,
+        episodeTitle: title.trim(), lines, headlines: format === 'bulletin' ? headlines : [],
+        speakers: speakerNames.map((name, i) => ({ name, voiceId: voices[i], imageBase64: photos[i] ?? undefined })),
+      }, { id: tts.audioId, base64: tts.audioBase64 }, { id: 'speechId', base64: 'speechBase64' });
       const job = await vRes.json().catch(() => ({}));
       if (!vRes.ok || !job.jobId) throw new Error(job.error || 'تعذّر تجهيز الفيديو');
       while (!cancelled.current) {

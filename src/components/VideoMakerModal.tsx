@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Film, Loader2, Download, ImagePlus, UserRound, Square, RectangleVertical, RectangleHorizontal } from 'lucide-react';
+import { postRender } from '../utils/postRender';
 
 type VideoFormat = 'square' | 'vertical' | 'landscape';
 
 interface VideoMakerModalProps {
   audioBase64: string;
+  audioId?: string;        // the server still has this clip: the request names it instead of uploading it again
   text: string;            // spoken text, used for the synced captions
   voiceId: string;         // e.g. "Puck" or "Puck+Kore" for dialogues; picks the default portrait
   voiceAvatar?: string;
@@ -19,7 +21,7 @@ const FORMATS: { id: VideoFormat; label: string; hint: string; icon: React.Eleme
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-export const VideoMakerModal: React.FC<VideoMakerModalProps> = ({ audioBase64, text, voiceId, voiceAvatar, onClose }) => {
+export const VideoMakerModal: React.FC<VideoMakerModalProps> = ({ audioBase64, audioId, text, voiceId, voiceAvatar, onClose }) => {
   const [format, setFormat] = useState<VideoFormat>('vertical');
   const [imageSource, setImageSource] = useState<'voice' | 'upload'>('voice');
   const [uploaded, setUploaded] = useState<{ dataUrl: string; name: string } | null>(null);
@@ -56,20 +58,15 @@ export const VideoMakerModal: React.FC<VideoMakerModalProps> = ({ audioBase64, t
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     try {
-      const res = await fetch('/api/video/render', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64,
-          text,
-          format,
-          voiceId,
-          imageBase64: imageSource === 'upload' ? uploaded?.dataUrl : undefined,
-          title,
-          captions,
-          hd,
-        }),
-      });
+      const res = await postRender('/api/video/render', {
+        text,
+        format,
+        voiceId,
+        imageBase64: imageSource === 'upload' ? uploaded?.dataUrl : undefined,
+        title,
+        captions,
+        hd,
+      }, { id: audioId, base64: audioBase64 });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.jobId) throw new Error(data.error || 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.');
 

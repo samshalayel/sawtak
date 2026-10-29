@@ -8,6 +8,7 @@ import {
 } from '../data/greetings';
 import { AuthUser, ServicePrices } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
+import { postRender } from '../utils/postRender';
 import { AudioTagBar } from './AudioTagBar';
 
 // Voice greetings: occasion → name → message → voice → (photo / own template) → 9:16 video to share.
@@ -303,25 +304,20 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
 
       // 2. The video (free), rendered in the background and polled
       setStage('video');
-      const videoRes = await fetch('/api/video/render', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64: tts.audioBase64,
-          text: text.trim(),
-          voiceId,
-          title: title.trim(),
-          captions: true,
-          greeting: {
-            occasion: occasion.id,
-            from: from.trim() ? `مع المحبة، ${from.trim()}` : '',
-            photoBox: bgMode === 'template' ? photoBox : undefined,
-            textStyle,
-          },
-          imageBase64: photo ?? undefined,
-          templateBase64: bgMode === 'template' ? template ?? undefined : undefined,
-        }),
-      });
+      const videoRes = await postRender('/api/video/render', {
+        text: text.trim(),
+        voiceId,
+        title: title.trim(),
+        captions: true,
+        greeting: {
+          occasion: occasion.id,
+          from: from.trim() ? `مع المحبة، ${from.trim()}` : '',
+          photoBox: bgMode === 'template' ? photoBox : undefined,
+          textStyle,
+        },
+        imageBase64: photo ?? undefined,
+        templateBase64: bgMode === 'template' ? template ?? undefined : undefined,
+      }, { id: tts.audioId, base64: tts.audioBase64 });
       const job = await videoRes.json().catch(() => ({}));
       if (!videoRes.ok || !job.jobId) throw new Error(job.error || 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.');
 

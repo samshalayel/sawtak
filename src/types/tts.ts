@@ -51,6 +51,7 @@ export interface HistoryItem {
   title: string;
   audioUrl: string; // Object URL or data URL
   audioBase64?: string;
+  audioId?: string; // the server keeps the clip for a while; video requests name it instead of uploading it
   voice: string;
   voiceName: string;
   language: string;

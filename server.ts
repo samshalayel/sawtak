@@ -19,6 +19,7 @@ const {
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { elevenLabsEnabled, synthesizeElevenLabs } = await import('./server/tts-elevenlabs.ts');
 const { openRouterEnabled, synthesizeOpenRouter } = await import('./server/tts-openrouter.ts');
+const { keepAudio, takeAudio } = await import('./server/audio-handoff.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
 const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
@@ -409,6 +410,7 @@ app.post('/api/tts/generate', requireAuth, requireVerifiedEmail, async (req, res
     res.json({
       success: true,
       audioBase64: wav.toString('base64'),
+      audioId: keepAudio(user.id, wav),
       mimeType: 'audio/wav',
       voice,
       textLength: text.length,
@@ -540,6 +542,7 @@ app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res
     res.json({
       success: true,
       audioBase64: wav.toString('base64'),
+      audioId: keepAudio(user.id, wav),
       mimeType: 'audio/wav',
       durationSeconds: audioSeconds,
       creditsCharged: charged,
@@ -669,7 +672,7 @@ setInterval(() => {
 
 app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
-    const { audioBase64, text = '', voiceId = '', imageBase64 = '', title = '', captions = true, hd = false } = req.body ?? {};
+    const { audioBase64, audioId, text = '', voiceId = '', imageBase64 = '', title = '', captions = true, hd = false } = req.body ?? {};
     // Occasion greeting: themed artwork, always vertical (WhatsApp status / reels)
     const greeting = isGreetingTheme(req.body?.greeting?.occasion)
       ? {
@@ -690,7 +693,12 @@ app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res
         return res.status(400).json({ success: false, error: 'تعذّر قراءة صورة القالب، جرّب صورة JPG أو PNG' });
       }
     }
-    if (typeof audioBase64 !== 'string' || !audioBase64) {
+    // The voice the server just made is kept for a while: the page sends its id instead of uploading it again
+    const keptWav = typeof audioId === 'string' ? takeAudio(req.user!.id, audioId) : null;
+    if (!keptWav && audioId && !audioBase64) {
+      return res.status(410).json({ success: false, code: 'AUDIO_EXPIRED', error: 'انتهت صلاحية المقطع الصوتي، أعد المحاولة.' });
+    }
+    if (!keptWav && (typeof audioBase64 !== 'string' || !audioBase64)) {
       return res.status(400).json({ success: false, error: 'لا يوجد مقطع صوتي لتحويله' });
     }
     if (!['square', 'vertical', 'landscape'].includes(format)) {
@@ -701,7 +709,7 @@ app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res
       return res.status(429).json({ success: false, error: 'وصلت للحد الأقصى من الفيديوهات خلال ساعة، يرجى المحاولة لاحقاً.' });
     }
 
-    const wav = Buffer.from(audioBase64, 'base64');
+    const wav = keptWav ?? Buffer.from(audioBase64, 'base64');
     if (wav.subarray(0, 4).toString('ascii') !== 'RIFF' || pcmSeconds(wav) > MAX_VIDEO_SECONDS) {
       return res.status(400).json({ success: false, error: 'المقطع الصوتي غير صالح أو أطول من 5 دقائق' });
     }
@@ -804,7 +812,12 @@ app.use('/api/motion', createMotionRouter({
 app.post('/api/press/video', requireAuth, requireVerifiedEmail, async (req, res) => {
   try {
     const body = req.body ?? {};
-    const speech = typeof body.speechBase64 === 'string' ? Buffer.from(body.speechBase64, 'base64') : null;
+    // The voice the server just made is kept for a while: the page sends its id instead of uploading it again
+    const keptSpeech = typeof body.speechId === 'string' ? takeAudio(req.user!.id, body.speechId) : null;
+    if (!keptSpeech && body.speechId && !body.speechBase64) {
+      return res.status(410).json({ success: false, code: 'AUDIO_EXPIRED', error: 'انتهت صلاحية المقطع الصوتي، أعد المحاولة.' });
+    }
+    const speech = keptSpeech ?? (typeof body.speechBase64 === 'string' ? Buffer.from(body.speechBase64, 'base64') : null);
     if (!speech || speech.subarray(0, 4).toString('ascii') !== 'RIFF' || pcmSeconds(speech) > MAX_VIDEO_SECONDS) {
       return res.status(400).json({ success: false, error: 'المقطع الصوتي غير صالح أو أطول من 5 دقائق' });
     }
