@@ -21,7 +21,8 @@ import { requireAdmin } from './auth.ts';
 import { db } from './db.ts';
 import { enabled as jawwalEnabled, post, msgId, GatewayRefusal, customerError, failureStatus, PHONE_RE } from './jawwal.ts';
 
-const PRIVATE_PEM = (process.env.WIFI_LICENSE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n').trim();
+// Some env_file readers keep the quotes and the \n escapes as written, others undo them: accept both
+const PRIVATE_PEM = (process.env.WIFI_LICENSE_PRIVATE_KEY ?? '').trim().replace(/^(["'])([\s\S]*)\1$/, '$2').replace(/\\n/g, '\n').trim();
 const PRICES = {
   basic: Number(process.env.WIFI_PRICE_BASIC) || 50,
   pro: Number(process.env.WIFI_PRICE_PRO) || 100,
