@@ -40,6 +40,7 @@ const { createMedicalRouter, getDoctorProfile, readDoctorLogo, identityLines, ba
 const { MEDICAL_DISCLAIMER, MEDICAL_LIMITS } = await import('./src/data/medical.ts');
 const { moderateFull, BLOCKED_MESSAGE } = await import('./server/moderation.ts');
 const { jawwalRouter } = await import('./server/jawwal.ts');
+const { wifiRouter, WIFI_BUY_PAGE } = await import('./server/wifi-license.ts');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1082,6 +1083,9 @@ ${text}`, 'video'))) return;
   res.status(202).json({ success: true, jobId: job.id, balance });
 });
 app.use('/api/jawwal', jawwalRouter);
+// Router monitor licenses: the desktop installer opens the buy page, then picks the key up (server/wifi-license.ts)
+app.use('/api/wifi', wifiRouter);
+app.get('/wifi/buy', (_req, res) => res.sendFile(WIFI_BUY_PAGE));
 
 // Quran reel (its own service): a reciter's recitation of whole verses over calm scenes, each verse's captions laid
 // over the reciter's sound (see server/quran.ts). No AI voice, so only the reel price is charged.
