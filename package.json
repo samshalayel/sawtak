@@ -23,6 +23,7 @@
     "express": "^4.21.2",
     "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
+    "mediabunny": "^1.63.0",
     "motion": "^12.23.24",
     "nodemailer": "^10.0.14",
     "react": "^19.0.1",

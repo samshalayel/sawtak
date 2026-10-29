@@ -236,7 +236,8 @@ export function greetingLayout(
 function buildGreetingAss(
   scale: number, width: number, height: number, theme: GreetingTheme,
   captions: { start: number; end: number; text: string }[], duration: number, title: string, from: string, domain: string,
-  place: { captionsBottom: number; fromBottom: number }, style: TextStyle, fromColor: string
+  place: { captionsBottom: number; fromBottom: number }, style: TextStyle, fromColor: string,
+  only?: 'static' | 'captions' // the fixed layers (watermark, title, sender line) or just the captions
 ): string {
   const t = { ...GREETING_TEXT, ...place, titleTop: style.titleTop, titleSize: style.titleSize, captionSize: style.captionSize };
   const px = (n: number) => Math.round(n * scale);
@@ -253,11 +254,15 @@ function buildGreetingAss(
     `Style: From,${font},${px(t.fromSize)},${assColor(fromColor)},&H00FFFFFF,${isDarkColor(fromColor) ? '&H40FFFFFF' : '&H60000000'},&H80000000,1,0,0,0,100,100,0,0,1,${px(3)},${px(2)},2,${px(60)},${px(60)},${px(t.fromBottom)},-1`,
     `Style: Mark,${ARABIC_FONT},${px(30)},&H99FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,2,${px(40)},${px(40)},${px(60)},-1`,
     '', '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    `Dialogue: 0,${assTime(0)},${assTime(duration)},Mark,,0,0,0,,${assText(watermarkFor(domain))}`,
   ];
-  if (title) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},Title,,0,0,0,,${assText(title)}`);
-  if (from) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},From,,0,0,0,,${assText(from)}`);
-  for (const c of captions) lines.push(`Dialogue: 1,${assTime(c.start)},${assTime(c.end)},Caption,,0,0,0,,${assText(c.text)}`);
+  if (only !== 'captions') {
+    lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},Mark,,0,0,0,,${assText(watermarkFor(domain))}`);
+    if (title) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},Title,,0,0,0,,${assText(title)}`);
+    if (from) lines.push(`Dialogue: 0,${assTime(0)},${assTime(duration)},From,,0,0,0,,${assText(from)}`);
+  }
+  if (only !== 'static') {
+    for (const c of captions) lines.push(`Dialogue: 1,${assTime(c.start)},${assTime(c.end)},Caption,,0,0,0,,${assText(c.text)}`);
+  }
   return lines.join('\n') + '\n';
 }
 
@@ -433,6 +438,110 @@ async function renderNow({ wav, text, image, format, greeting, title = '', capti
     ], dir, { timeoutMs: renderTimeoutMs(duration), duration, onProgress });
 
     return await fs.readFile(path.join(dir, 'out.mp4'));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------- Greeting video put together by the customer's browser ----------
+
+export interface GreetingPlan {
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
+  /** Background, artwork, headline, sender line and watermark: the video before any wave or caption (PNG, base64). */
+  frame: string;
+  /** Where and how the sound wave is drawn (null: this design has no wave). */
+  wave: { x: number; y: number; w: number; h: number; color: string; alpha: number; boost: number } | null;
+  /** Each caption as a full-frame transparent PNG (base64), shown from `start` to `end` seconds. */
+  captions: { start: number; end: number; png: string }[];
+  /** The voice as AAC in an MP4 file (base64): the browser copies it into the video without encoding it again. */
+  audio: string;
+}
+
+/**
+ * A caption as a transparent PNG from two renders of it, one over black and one over white (libass only paints colour,
+ * never opacity): the opacity is how much of the white shows through, and the colour is the black render undone of it.
+ */
+async function transparentCaption(onBlack: Buffer, onWhite: Buffer): Promise<Buffer> {
+  const [b, w] = await Promise.all([onBlack, onWhite].map(png => sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true })));
+  const { width, height } = b.info;
+  const out = Buffer.alloc(width * height * 4);
+  for (let i = 0, o = 0; i < width * height * 3; i += 3, o += 4) {
+    const a = Math.min(1, Math.max(0, 1 - (w.data[i] - b.data[i] + w.data[i + 1] - b.data[i + 1] + w.data[i + 2] - b.data[i + 2]) / (3 * 255)));
+    if (a < 0.004) continue;
+    out[o] = Math.min(255, Math.round(b.data[i] / a));
+    out[o + 1] = Math.min(255, Math.round(b.data[i + 1] / a));
+    out[o + 2] = Math.min(255, Math.round(b.data[i + 2] / a));
+    out[o + 3] = Math.round(a * 255);
+  }
+  return sharp(out, { raw: { width, height, channels: 4 } }).png({ compressionLevel: 9 }).toBuffer();
+}
+
+/**
+ * Everything a browser needs to build a greeting video itself (see src/utils/clientRender.ts): the fixed picture, the
+ * captions and the sound wave placement. The artwork, fonts and caption boxes come from the same code and the same
+ * libass as the server render, so the two look alike; only the wave is left for the browser to draw. Mirrors the
+ * set-up of renderNow.
+ */
+export async function planGreetingVideo({ wav, text, image, greeting, title = '', captions = true, domain = 'tts.smartcloud.ps' }: RenderOptions): Promise<GreetingPlan> {
+  if (!greeting) throw new Error('Only greeting videos can be planned');
+  const profile = RENDER_PROFILES.fast;
+  const theme = GREETING_THEMES[greeting.themeId];
+  const placement = greetingLayout(greeting, Boolean(image));
+  const showWave = placement.waveHeight > 0;
+  const fromColor = greeting.template
+    ? await waveColorFor(greeting.template, Math.max(0, 1920 - placement.fromBottom - 70), 60, theme)
+    : theme.accent;
+  const layout = scaleLayout({ ...LAYOUTS.vertical, waveTop: placement.waveTop, waveHeight: placement.waveHeight || 2 }, profile.scale);
+  const waveColor = greeting.template && showWave ? await waveColorFor(greeting.template, placement.waveTop, placement.waveHeight, theme) : theme.accent;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `sawtik-plan-${crypto.randomBytes(4).toString('hex')}-`));
+  try {
+    const { duration } = speechIntervals(wav);
+    const timed = captions ? timeCaptions(text, wav) : [];
+    const ass = (only: 'static' | 'captions') => buildGreetingAss(
+      layout.width / GREETING_DESIGN.width, layout.width, layout.height, theme, timed, duration, title.slice(0, 60),
+      (greeting.from || '').slice(0, 40), domain, placement, greeting.textStyle ?? DEFAULT_TEXT_STYLE, fromColor, only);
+    await Promise.all([
+      fs.writeFile(path.join(dir, 'audio.wav'), wav),
+      fs.writeFile(path.join(dir, 'bg.png'), await buildGreetingBackground(layout.width, layout.height, theme, greeting.themeId, image, greeting.template ?? null, greeting.photoBox)),
+      fs.writeFile(path.join(dir, 'static.ass'), ass('static')),
+      fs.writeFile(path.join(dir, 'caps.ass'), ass('captions')),
+    ]);
+
+    // One still frame of each caption, over black and over white, run through libass at the middle of that caption
+    const frames: number[] = [];
+    for (const c of timed) {
+      const n = Math.round(((c.start + c.end) / 2) * profile.fps);
+      frames.push(frames.length && n <= frames[frames.length - 1] ? frames[frames.length - 1] + 1 : n);
+    }
+    const lastFrame = (frames[frames.length - 1] ?? 0) + 1;
+    const opts = (extra: object) => ({ timeoutMs: renderTimeoutMs(duration), duration: 1, ...extra });
+    const captionFrames = (color: 'black' | 'white', prefix: string) => fs.writeFile(path.join(dir, `caps-${color}.txt`), `subtitles=caps.ass,select='${frames.map(n => `eq(n\\,${n})`).join('+')}'`).then(() =>
+      runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=${color}:s=${layout.width}x${layout.height}:r=${profile.fps}:d=${((lastFrame + 1) / profile.fps).toFixed(3)}`,
+        '-filter_script:v', `caps-${color}.txt`, '-fps_mode', 'passthrough', '-frames:v', String(frames.length), `${prefix}%04d.png`], dir, opts({})));
+    await Promise.all([
+      runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', 'bg.png', '-vf', 'subtitles=static.ass', '-frames:v', '1', 'frame.png'], dir, opts({})),
+      runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', 'audio.wav', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', 'audio.m4a'], dir, opts({})),
+      ...(frames.length ? [captionFrames('black', 'capB'), captionFrames('white', 'capW')] : []),
+    ]);
+
+    const b64 = async (file: string) => (await fs.readFile(path.join(dir, file))).toString('base64');
+    return {
+      width: layout.width, height: layout.height, fps: profile.fps, duration,
+      frame: await b64('frame.png'),
+      wave: showWave ? {
+        x: Math.round((layout.width - Math.round(layout.width * 0.8)) / 2), y: layout.waveTop, w: Math.round(layout.width * 0.8), h: layout.waveHeight,
+        color: waveColor, alpha: greeting.template ? 0.6 : 1, boost: greeting.template ? 1.6 : 4,
+      } : null,
+      captions: await Promise.all(timed.map(async (c, i) => {
+        const n = String(i + 1).padStart(4, '0');
+        const png = await transparentCaption(await fs.readFile(path.join(dir, `capB${n}.png`)), await fs.readFile(path.join(dir, `capW${n}.png`)));
+        return { start: c.start, end: c.end, png: png.toString('base64') };
+      })),
+      audio: await b64('audio.m4a'),
+    };
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

@@ -22,7 +22,7 @@ const { openRouterEnabled, synthesizeOpenRouter, synthesizeOpenRouterDialogue } 
 const { keepAudio, takeAudio } = await import('./server/audio-handoff.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
-const { renderVoiceVideo, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
+const { renderVoiceVideo, planGreetingVideo, enqueueRender, normalizeImage, normalizeTemplate, RenderBusyError, renderQueueFull, localRenderBusy, RENDER_SLOTS } = await import('./server/video.ts');
 const { lambdaConfigured, renderOnLambda, reelLink } = await import('./server/reel-lambda.ts');
 const { isGreetingTheme } = await import('./server/greeting-themes.ts');
 const { clampPhotoBox, clampTextStyle } = await import('./server/greeting-art.ts');
@@ -744,6 +744,22 @@ app.post('/api/video/render', requireAuth, requireVerifiedEmail, async (req, res
       const firstVoice = String(voiceId).split('+')[0];
       const avatar = VOICES.find(v => v.id === firstVoice)?.avatar;
       image = await fs.readFile(path.join(__dirname, 'public', avatar ?? '/avatars/Kore.webp'));
+    }
+
+    // A greeting the customer's browser puts together itself: send what it needs instead of rendering here
+    if (req.body?.plan === true) {
+      if (!greeting) return res.status(400).json({ success: false, error: 'هذا النوع من الفيديو لا يدعم التجهيز على الجهاز' });
+      try {
+        const plan = await enqueueRender(() => planGreetingVideo({
+          wav, text: String(text).slice(0, 5000), image, format, greeting, title: String(title).trim().slice(0, 60),
+          captions: captions !== false, domain: watermarkDomain(req.hostname),
+        }));
+        return res.json({ success: true, plan });
+      } catch (error: any) {
+        if (error instanceof RenderBusyError) return res.status(503).json({ success: false, error: 'هناك فيديوهات أخرى قيد التجهيز الآن، يرجى المحاولة بعد دقيقة.' });
+        console.error('Video plan failed:', error);
+        return res.status(500).json({ success: false, error: 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.' });
+      }
     }
 
     // Rendering runs in the background; the client polls /api/video/jobs/:id for progress

@@ -119,6 +119,15 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
 
   const [stage, setStage] = useState<Stage>('idle');
   const [progress, setProgress] = useState(0);
+  // Put the video together on this device instead of the server (browsers that can encode H.264; a trial option)
+  const canOnDevice = typeof VideoEncoder !== 'undefined' && typeof createImageBitmap !== 'undefined';
+  const [onDevice, setOnDevice] = useState(() => {
+    try { return localStorage.getItem('sawtik.onDevice') === '1'; } catch { return false; }
+  });
+  const toggleOnDevice = (on: boolean) => {
+    setOnDevice(on);
+    try { localStorage.setItem('sawtik.onDevice', on ? '1' : '0'); } catch { /* storage disabled */ }
+  };
   const [error, setError] = useState<{ text: string; needsCredits?: boolean } | null>(null);
   const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -304,7 +313,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
 
       // 2. The video (free), rendered in the background and polled
       setStage('video');
-      const videoRes = await postRender('/api/video/render', {
+      const videoBody = {
         text: text.trim(),
         voiceId,
         title: title.trim(),
@@ -317,7 +326,35 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
         },
         imageBase64: photo ?? undefined,
         templateBase64: bgMode === 'template' ? template ?? undefined : undefined,
-      }, { id: tts.audioId, base64: tts.audioBase64 });
+      };
+      const voice = { id: tts.audioId as string | undefined, base64: tts.audioBase64 as string };
+
+      // On this device: the server only sends the picture, the captions and the voice; the browser builds the MP4.
+      // If anything is unsupported or fails, the server renders it as usual.
+      if (onDevice && canOnDevice) {
+        try {
+          const planRes = await postRender('/api/video/render', { ...videoBody, plan: true }, voice);
+          const data = await planRes.json().catch(() => ({}));
+          if (!planRes.ok || !data.plan) {
+            // A refusal the server would repeat (blocked text, hourly limit…) is shown as it is
+            if (planRes.status < 500) throw Object.assign(new Error(data.error || 'تعذّر تجهيز الفيديو'), { shown: true });
+            throw new Error('plan failed');
+          }
+          const { renderGreetingOnDevice, canRenderOnDevice } = await import('../utils/clientRender');
+          if (!(await canRenderOnDevice(data.plan.width, data.plan.height))) throw new Error('H.264 not supported');
+          const blob = await renderGreetingOnDevice(data.plan, voice.base64, f => setProgress(Math.round(f * 100)), () => cancelled.current);
+          if (cancelled.current) return;
+          setResult({ url: URL.createObjectURL(blob), blob });
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        } catch (err: any) {
+          if (err?.shown) throw err;
+          console.warn('On-device video failed, using the server:', err);
+          setProgress(0);
+        }
+      }
+
+      const videoRes = await postRender('/api/video/render', videoBody, voice);
       const job = await videoRes.json().catch(() => ({}));
       if (!videoRes.ok || !job.jobId) throw new Error(job.error || 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.');
 
@@ -706,10 +743,19 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
         </div>
       )}
 
+      {canOnDevice && mode === 'single' && (
+        <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
+          <input type="checkbox" checked={onDevice} disabled={busy} onChange={e => toggleOnDevice(e.target.checked)} className="mt-0.5 accent-amber-500" />
+          <span>جهّز الفيديو على جهازي <span className="text-amber-300">(تجربة)</span>
+            <span className="block text-[11px] text-slate-500">لا انتظار في الدور، ويستهلك معالج جهازك. إن لم يعمل يُجهَّز على الخادم تلقائياً.</span>
+          </span>
+        </label>
+      )}
+
       {busy && (
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-slate-300">
-            <span>{stage === 'voice' ? 'نسجّل التهنئة بالصوت…' : 'نجهّز الفيديو…'}</span>
+            <span>{stage === 'voice' ? 'نسجّل التهنئة بالصوت…' : onDevice && canOnDevice ? 'نجهّز الفيديو على جهازك…' : 'نجهّز الفيديو…'}</span>
             {stage === 'video' && <span className="font-mono text-amber-300">{progress}%</span>}
           </div>
           <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
