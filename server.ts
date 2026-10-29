@@ -18,7 +18,7 @@ const {
 } = await import('./server/credits.ts');
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { elevenLabsEnabled, synthesizeElevenLabs } = await import('./server/tts-elevenlabs.ts');
-const { openRouterEnabled, synthesizeOpenRouter } = await import('./server/tts-openrouter.ts');
+const { openRouterEnabled, synthesizeOpenRouter, synthesizeOpenRouterDialogue } = await import('./server/tts-openrouter.ts');
 const { keepAudio, takeAudio } = await import('./server/audio-handoff.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');
@@ -454,6 +454,44 @@ function parseDialogueRequest(body: any): { error: string } | { speakers: { name
   return { speakers: cleanSpeakers, lines };
 }
 
+/**
+ * A two-voice conversation: Gemini TTS through OpenRouter when TTS_PROVIDER=openrouter (Gemini direct takes over if that
+ * fails and Gemini keys are set), otherwise Gemini multi-speaker TTS failing over across API keys.
+ */
+async function synthesizeDialogue(speakers: { name: string; voice: string }[], lines: DialogueLine[], style: string): Promise<{ response: any; keyId: number | undefined; wav: Buffer | null }> {
+  if (openRouterEnabled()) {
+    try {
+      const voiceOf = new Map(speakers.map(s => [s.name, s.voice]));
+      const turns = lines.map(l => ({ text: l.text, voice: voiceOf.get(l.speaker)! }));
+      return { response: { usageMetadata: {} }, keyId: undefined, wav: await synthesizeOpenRouterDialogue(turns, style) };
+    } catch (error: any) {
+      if (!hasUsableKeys()) throw error;
+      console.error('OpenRouter dialogue failed, using Gemini:', error?.message || error);
+    }
+  }
+  // Gemini multi-speaker TTS: one part per line, each tagged with its speaker
+  const { result: response, keyId } = await withGeminiFailover('dialogue', client => client.models.generateContent({
+    model: TTS_MODEL,
+    contents: [{
+      role: 'user',
+      parts: lines.map(l => ({ text: l.text, speechMetadata: { speaker: l.speaker, style } })),
+    }],
+    config: {
+      responseModalities: ['AUDIO'],
+      speechConfig: {
+        multiSpeakerVoiceConfig: {
+          speakerVoiceConfigs: speakers.map(s => ({
+            speaker: s.name,
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: s.voice } },
+          })),
+        },
+      },
+    },
+  } as Parameters<typeof client.models.generateContent>[0]));
+  const audio = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data)?.inlineData;
+  return { response, keyId, wav: audio?.data ? toWavBuffer(audio.data, audio.mimeType) : null };
+}
+
 app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res) => {
   const user = req.user!;
   let held = 0;
@@ -470,7 +508,7 @@ app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res
     if (fullText.length > maxTextChars) {
       return res.status(400).json({ success: false, error: `الحوار أطول من الحد المسموح (${maxTextChars} حرف). يرجى تقصيره.` });
     }
-    if (!hasUsableKeys()) return res.status(500).json({ success: false, error: GENERIC_MESSAGE });
+    if (!openRouterEnabled() && !hasUsableKeys()) return res.status(500).json({ success: false, error: GENERIC_MESSAGE });
     if (!generationLimiter(`user:${user.id}`)) {
       return res.status(429).json({ success: false, error: 'طلبات كثيرة خلال وقت قصير، يرجى الانتظار دقيقة ثم المحاولة.' });
     }
@@ -494,36 +532,16 @@ app.post('/api/tts/dialogue', requireAuth, requireVerifiedEmail, async (req, res
     const style = buildStyleDirective({ dialect, toneStyle, customStylePrompt, speed }) +
       '. Natural two-person conversation with realistic turn-taking, reactions and pacing';
 
-    // Gemini multi-speaker TTS: one part per line, each tagged with its speaker
-    const { result: response, keyId } = await withGeminiFailover('dialogue', client => client.models.generateContent({
-      model: TTS_MODEL,
-      contents: [{
-        role: 'user',
-        parts: lines.map(l => ({ text: l.text, speechMetadata: { speaker: l.speaker, style } })),
-      }],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          multiSpeakerVoiceConfig: {
-            speakerVoiceConfigs: speakers.map(s => ({
-              speaker: s.name,
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: s.voice } },
-            })),
-          },
-        },
-      },
-    } as Parameters<typeof client.models.generateContent>[0]));
+    const { response, keyId, wav } = await synthesizeDialogue(speakers, lines, style);
 
     const voiceLabel = speakers.map(s => s.voice).join('+');
-    const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
-    if (!audioPart?.inlineData?.data) {
+    if (!wav) {
       releaseCredits(user.id, held);
       held = 0;
       logUsage({ userId: user.id, feature: 'dialogue', model: TTS_MODEL, voice: voiceLabel, chars: fullText.length, ...usageTokens(response), status: 'failed', apiKeyId: keyId });
       return res.status(503).json({ success: false, error: 'لم يتم استلام مقطع صوتي من النموذج. يرجى تعديل الحوار والمحاولة مجدداً.' });
     }
 
-    const wav = toWavBuffer(audioPart.inlineData.data, audioPart.inlineData.mimeType);
     const audioSeconds = pcmSeconds(wav);
     const tokens = usageTokens(response);
     const { charged, balance } = settleTtsCharge({

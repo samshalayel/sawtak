@@ -26,12 +26,12 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The text spoken by Gemini TTS through OpenRouter in `voice` with the style directive; a 24 kHz mono WAV, or null when empty. */
-export async function synthesizeOpenRouter(text: string, voice: string, style: string): Promise<Buffer | null> {
+/** One speech request (a single voice or several turns); the raw PCM comes back as a 24 kHz mono WAV, or null when empty. */
+async function requestSpeech(payload: Record<string, unknown>): Promise<Buffer | null> {
   const url = `${process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1'}/audio/speech`;
   const body = JSON.stringify({
     model: process.env.OPENROUTER_TTS_MODEL || 'google/gemini-3.8-flash-lite-tts',
-    input: text, voice, instructions: style, response_format: 'pcm', // Gemini TTS only returns raw PCM
+    ...payload, response_format: 'pcm', // Gemini TTS only returns raw PCM
   });
   const pcm = await withSlot(async () => {
     for (let attempt = 0; ; attempt++) {
@@ -48,4 +48,17 @@ export async function synthesizeOpenRouter(text: string, voice: string, style: s
     }
   });
   return pcm.length > 0 ? wavFromPcm(pcm, Number(process.env.OPENROUTER_PCM_RATE) || 24000) : null;
+}
+
+/** The text spoken by Gemini TTS through OpenRouter in `voice` with the style directive; a 24 kHz mono WAV, or null when empty. */
+export function synthesizeOpenRouter(text: string, voice: string, style: string): Promise<Buffer | null> {
+  return requestSpeech({ input: text, voice, instructions: style });
+}
+
+export interface DialogueTurn { text: string; voice: string }
+
+/** A conversation: each turn in its own voice, in one request (Gemini multi-speaker). One voice for every turn is read as plain text. */
+export function synthesizeOpenRouterDialogue(turns: DialogueTurn[], style: string): Promise<Buffer | null> {
+  if (new Set(turns.map(t => t.voice)).size === 1) return requestSpeech({ input: turns.map(t => t.text).join('\n'), voice: turns[0].voice, instructions: style });
+  return requestSpeech({ input: turns.map(t => ({ text: t.text, voice: t.voice })), instructions: style });
 }
