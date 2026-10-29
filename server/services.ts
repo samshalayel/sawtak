@@ -48,6 +48,7 @@ function serviceOf(method: string, path: string): ServiceId | null {
   if (path === '/api/motion/script' || path === '/api/motion/jobs') return 'motion';
   if (path.startsWith('/api/press/')) return 'press';
   if (path === '/api/jawwal/otp' || path === '/api/jawwal/pay') return 'payments';
+  if (path === '/api/wifi/otp' || path === '/api/wifi/pay') return 'payments';
   if (path === '/api/medical/review' || path === '/api/medical/card' || path === '/api/medical/reel') return 'medical';
   return null;
 }

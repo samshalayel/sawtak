@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>شراء مين شابك على الواي فاي</title>
+<style>
+:root{
+  --bg:#f5f3ff;--card:#fff;--text:#1e1b4b;--muted:#6b6894;--line:#e6e3f7;--p:#2563eb;
+  --ok:#059669;--okbg:#d1fae5;--bad:#dc2626;--badbg:#fee2e2;--warnbg:#fef3c7;
+  --grad:linear-gradient(135deg,#7c3aed 0%,#2563eb 55%,#06b6d4 100%);
+}
+@media (prefers-color-scheme:dark){:root{--bg:#0f0d1f;--card:#1a1733;--text:#ecebff;--muted:#a19fc9;--line:#2c2850;--okbg:#064e3b;--badbg:#4c1d1d;--warnbg:#4a3b0b}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:"Segoe UI",Tahoma,system-ui,sans-serif}
+.top{background:var(--grad);color:#fff;text-align:center;padding:26px 16px 64px}
+.top h1{margin:6px 0 2px;font-size:1.45rem}.top p{margin:0;opacity:.9;font-size:.95rem}
+main{max-width:520px;margin:-40px auto 32px;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px 20px;box-shadow:0 16px 36px -20px rgba(76,29,149,.35)}
+.rid{direction:ltr;text-align:center;background:var(--bg);border-radius:12px;padding:10px;font-weight:700;letter-spacing:.04em}
+.lbl{font-weight:600;margin:16px 0 8px;display:block}
+.tiers{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tier{border:2px solid var(--line);border-radius:16px;padding:14px 12px;cursor:pointer;background:var(--card);text-align:right;font:inherit;color:inherit;transition:.15s}
+.tier.on{border-color:var(--p);box-shadow:0 0 0 3px color-mix(in srgb,var(--p) 20%,transparent)}
+.tier:disabled{opacity:.5;cursor:not-allowed}
+.tier b{display:block;font-size:1.05rem}
+.tier .price{font-size:1.6rem;font-weight:800;color:var(--p);margin:6px 0}
+.tier ul{margin:0;padding-inline-start:16px;font-size:.82rem;color:var(--muted);line-height:1.7}
+.tier .tag{font-size:.75rem;background:var(--okbg);color:var(--ok);border-radius:99px;padding:2px 8px;display:inline-block;margin-top:6px}
+input{width:100%;font:inherit;font-size:1.1rem;padding:13px;border-radius:12px;border:2px solid var(--line);background:var(--bg);color:var(--text);outline:none;direction:ltr;text-align:center}
+input:focus{border-color:var(--p)}
+.otp{font-size:1.7rem;letter-spacing:.4em}
+button.go{width:100%;border:0;border-radius:14px;padding:14px;font:inherit;font-size:1.05rem;font-weight:700;background:var(--grad);color:#fff;margin-top:16px;cursor:pointer}
+button.go:disabled{opacity:.55;cursor:wait}
+button.link{background:none;border:0;color:var(--p);font:inherit;cursor:pointer;padding:8px 0}
+.msg{border-radius:12px;padding:11px 13px;margin-top:12px;font-size:.92rem;line-height:1.7;display:none}
+.msg.err{display:block;background:var(--badbg);color:var(--bad)}
+.msg.info{display:block;background:var(--warnbg)}
+.done{text-align:center}
+.done .big{font-size:3.2rem}
+.key{direction:ltr;font-family:Consolas,monospace;font-size:.85rem;background:var(--bg);border-radius:12px;padding:12px;word-break:break-all;user-select:all;margin-top:10px}
+.foot{text-align:center;color:var(--muted);font-size:.8rem;margin-top:14px}
+.jp{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:.85rem;margin-top:10px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="top">
+  <div style="font-size:2.4rem">📶</div>
+  <h1>مين شابك على الواي فاي</h1>
+  <p>ادفع بجوال باي وبيتفعّل البرنامج لحاله</p>
+</div>
+<main><div class="card">
+
+  <section id="sBad" hidden>
+    <p>⚠️ الرابط ناقص. افتح صفحة الشراء من زر <b>"اشتري الآن"</b> جوّا البرنامج.</p>
+  </section>
+
+  <section id="sBuy" hidden>
+    <span class="lbl" style="margin-top:0">رقم الراوتر</span>
+    <div class="rid" id="rid"></div>
+
+    <span class="lbl">اختار النسخة</span>
+    <div class="tiers">
+      <button class="tier" data-t="basic" onclick="pick('basic')">
+        <b>الأساسية</b><div class="price" id="pBasic">–</div>
+        <ul><li>مين شابك هلأ</li><li>كم بيسحب كل جهاز</li><li>تسمية الأجهزة</li></ul>
+        <span class="tag" id="hBasic" hidden>عندك ✓</span>
+      </button>
+      <button class="tier" data-t="pro" onclick="pick('pro')">
+        <b>الكاملة ⭐</b><div class="price" id="pPro">–</div>
+        <ul><li>كل اللي بالأساسية</li><li>🚫 حظر أي جهاز</li><li>🐢 تحديد السرعة</li></ul>
+        <span class="tag" id="hPro" hidden>عندك ✓</span>
+      </button>
+    </div>
+    <div class="msg" id="owned"></div>
+
+    <div id="payBox">
+      <span class="lbl">رقم جوالك (محفظة جوال باي)</span>
+      <input id="phone" inputmode="tel" placeholder="059XXXXXXX" maxlength="14">
+      <div id="otpBox" hidden>
+        <span class="lbl">كود التأكيد اللي وصلك SMS</span>
+        <input id="otp" class="otp" inputmode="numeric" maxlength="8" autocomplete="one-time-code">
+      </div>
+      <div class="msg" id="msg"></div>
+      <button class="go" id="btn" onclick="next()">ابعتلي كود الدفع</button>
+      <div class="jp">🔒 الدفع عن طريق جوال باي</div>
+    </div>
+  </section>
+
+  <section id="sDone" class="done" hidden>
+    <div class="big">🎉</div>
+    <h2 style="margin:6px 0">تم! شكراً إلك</h2>
+    <p>ارجع للبرنامج على الكمبيوتر، <b>رح يتفعّل لحاله</b> خلال ثواني.</p>
+    <p style="color:var(--muted);font-size:.88rem;margin-bottom:0">إذا ما تفعّل، انسخ المفتاح والصقه بالبرنامج:</p>
+    <div class="key" id="key"></div>
+    <button class="link" onclick="copyKey()" id="cpy">📋 نسخ المفتاح</button>
+  </section>
+
+</div>
+<div class="foot">tts.smartcloud.ps</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const q=new URLSearchParams(location.search);
+const router=(q.get("router")||"").replace(/[^0-9a-f]/gi,"").toUpperCase();
+const claim=q.get("claim")||"";
+let tier=q.get("tier")==="basic"?"basic":"pro", info=null, sent=false;
+
+function msg(text,kind="err",id="msg"){const m=$(id);m.className="msg "+(text?kind:"");m.textContent=text||""}
+const shekel=n=>n+" ₪";
+
+/** 059XXXXXXX / 59XXXXXXX / +97059XXXXXXX / 0097059XXXXXXX → 0097059XXXXXXX */
+function phoneFmt(v){
+  const d=v.replace(/\D/g,"").replace(/^00/,"").replace(/^970/,"").replace(/^0/,"");
+  return /^5\d{8}$/.test(d)?"00970"+d:null;
+}
+async function api(path,opts){
+  const r=await fetch("/api/wifi/"+path,opts);
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok&&!j.error)j.error="صار خطأ، جرّب كمان مرة";
+  return j;
+}
+const postJson=(path,body)=>api(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+
+function pick(t){
+  if(!info||info.toPay[t]===null)return;
+  tier=t;sent=false;$("otpBox").hidden=true;$("btn").textContent="ابعتلي كود الدفع";msg("");
+  document.querySelectorAll(".tier").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+}
+
+async function load(){
+  if(router.length!==12){$("sBad").hidden=false;return}
+  $("rid").textContent=router.match(/../g).join(":");
+  $("sBuy").hidden=false;
+  info=await api("info?router="+router);
+  if(!info.success){msg(info.error);return}
+  for(const t of ["basic","pro"]){
+    const el=document.querySelector(`.tier[data-t="${t}"]`), pay=info.toPay[t], P=t==="basic"?"pBasic":"pPro";
+    $(P).textContent=pay===null?shekel(info.prices[t]):shekel(pay);
+    if(pay!==null&&pay<info.prices[t])$(P).insertAdjacentHTML("beforeend",' <small style="font-size:.7rem;color:var(--muted)">ترقية</small>');
+    el.disabled=pay===null;
+  }
+  if(info.current){
+    $(info.current==="pro"?"hPro":"hBasic").hidden=false;
+    if(info.current==="pro")$("hBasic").hidden=false;
+  }
+  if(info.current==="pro"){
+    $("payBox").hidden=true;
+    $("owned").className="msg info";
+    $("owned").innerHTML='هالراوتر عنده النسخة الكاملة أصلاً 👍 <button class="link" onclick="restore()">رجّع المفتاح للبرنامج</button>';
+    return;
+  }
+  if(info.current==="basic"){
+    $("owned").className="msg info";
+    $("owned").innerHTML='عندك النسخة الأساسية. فيك ترقّي للكاملة بالفرق بس، أو <button class="link" onclick="restore()">رجّع مفتاحك الحالي للبرنامج</button>';
+  }
+  if(info.toPay[tier]===null)tier="pro";
+  pick(tier);
+  if(!info.enabled){msg("البيع متوقف حالياً، يرجى المحاولة بعد قليل.");$("btn").disabled=true}
+}
+
+async function next(){
+  const phone=phoneFmt($("phone").value);
+  if(!phone){msg("اكتب رقم جوال صحيح يبدأ بـ 05");return}
+  $("btn").disabled=true;msg("");
+  if(!sent){
+    $("btn").textContent="⏳ عم نبعت الكود…";
+    const r=await postJson("otp",{router,tier,phone});
+    $("btn").disabled=false;
+    if(!r.success){$("btn").textContent="ابعتلي كود الدفع";msg(r.error);return}
+    sent=true;$("otpBox").hidden=false;$("otp").focus();
+    $("btn").textContent=`ادفع ${shekel(r.amount)}`;
+    msg(`وصلك كود على جوالك لدفع ${shekel(r.amount)}، اكتبه فوق.`,"info");
+    return;
+  }
+  const otp=$("otp").value.trim();
+  if(!/^\d{4,8}$/.test(otp)){$("btn").disabled=false;msg("اكتب الكود اللي وصلك");return}
+  const label=$("btn").textContent;$("btn").textContent="⏳ عم ندفع…";
+  const r=await postJson("pay",{router,tier,phone,otp,claim});
+  $("btn").disabled=false;$("btn").textContent=label;
+  if(!r.success){msg(r.error);return}
+  done(r.key);
+}
+async function restore(){
+  const r=await postJson("restore",{router,claim});
+  if(!r.success){msg(r.error,"err","owned");return}
+  done(r.key);
+}
+function done(key){$("sBuy").hidden=true;$("sDone").hidden=false;$("key").textContent=key}
+function copyKey(){navigator.clipboard.writeText($("key").textContent).then(()=>{$("cpy").textContent="✓ تم النسخ"})}
+$("phone").addEventListener("keydown",e=>{if(e.key==="Enter")next()});
+$("otp").addEventListener("keydown",e=>{if(e.key==="Enter")next()});
+load();
+</script>
+</body>
+</html>

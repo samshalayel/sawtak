@@ -24,12 +24,12 @@ const USERNAME  = process.env.JAWWAL_USERNAME  ?? '';
 const PASSWORD  = process.env.JAWWAL_PASSWORD  ?? '';
 const HMAC_KEY  = process.env.JAWWAL_HMAC_SECRET ?? '';
 
-const enabled = () => Boolean(USERNAME && PASSWORD && HMAC_KEY);
+export const enabled = () => Boolean(USERNAME && PASSWORD && HMAC_KEY);
 
 const UNAVAILABLE = 'خدمة الدفع غير متاحة حالياً، يرجى المحاولة بعد قليل.';
 
 /** A refusal from Jawwal Pay itself (wrong code, insufficient balance…): its message is meant for the customer. */
-class GatewayRefusal extends Error {}
+export class GatewayRefusal extends Error {}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,11 +65,11 @@ function secureHash(params: Record<string, string>, accessToken: string): string
   return crypto.createHmac('sha512', HMAC_KEY).update(joined).digest('hex').toLowerCase();
 }
 
-function msgId(): string {
+export function msgId(): string {
   return String(BigInt('0x' + crypto.randomBytes(7).toString('hex'))).slice(0, 14);
 }
 
-async function post(path: string, payload: Record<string, string>, timeoutMs = 20_000): Promise<any> {
+export async function post(path: string, payload: Record<string, string>, timeoutMs = 20_000): Promise<any> {
   for (let attempt = 1; ; attempt++) {
     const token = await getToken();
     // The token is part of the signature, so it is signed again after a fresh login
@@ -93,12 +93,12 @@ async function post(path: string, payload: Record<string, string>, timeoutMs = 2
 }
 
 /** What the customer is told: Jawwal's own refusal message, or a neutral line for anything technical. */
-function customerError(e: unknown) {
+export function customerError(e: unknown) {
   return e instanceof GatewayRefusal ? e.message : UNAVAILABLE;
 }
 
 // Never 502/504: Cloudflare replaces those with its own page, and the customer would lose our message
-const failureStatus = (e: unknown) => (e instanceof GatewayRefusal ? 400 : 503);
+export const failureStatus = (e: unknown) => (e instanceof GatewayRefusal ? 400 : 503);
 
 // ── packages and input ───────────────────────────────────────────────────────
 
@@ -107,7 +107,7 @@ const packageFor = (id: unknown, user: { role: string }): CreditPackage | undefi
   PACKAGES.find(p => p.id === id && (!p.adminOnly || user.role === 'admin'));
 
 /** Palestinian mobile in the gateway's format: 00970 followed by 9 digits starting with 5. */
-const PHONE_RE = /^009705\d{8}$/;
+export const PHONE_RE = /^009705\d{8}$/;
 
 // ── routes ───────────────────────────────────────────────────────────────────
 
