@@ -8,10 +8,12 @@ import { requireAdmin, requireAuth } from './auth.ts';
 import { customVoicesRouter } from './custom-voices.ts';
 import { quranReelStats } from './quran-stats.ts';
 import { openRouterStats } from './openrouter-stats.ts';
+import { aiVideoRouter } from './ai-video.ts';
 
 export const adminRouter = express.Router();
 adminRouter.use(requireAuth, requireAdmin);
 adminRouter.use('/custom-voices', customVoicesRouter);
+adminRouter.use('/ai-video', aiVideoRouter);
 
 adminRouter.get('/stats', (req, res) => {
   const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));

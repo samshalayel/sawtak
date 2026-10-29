@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
-  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, FlaskConical, Smartphone, BookOpen
+  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, Film, FlaskConical, Smartphone, BookOpen
 } from 'lucide-react';
 import { AuthUser, formatCredits, POINTS_TO_SECONDS } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
@@ -9,6 +9,7 @@ import { KeysTab } from './KeysTab';
 import { ModerationTab } from './ModerationTab';
 import { CustomVoicesTab } from './CustomVoicesTab';
 import { MotionTab } from './MotionTab';
+import { AiVideoTab } from './AiVideoTab';
 import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
 import { JawwalTab } from './JawwalTab';
@@ -17,7 +18,7 @@ import { usePaged } from './Pager';
 import { QuranReelsTab } from './QuranReelsTab';
 import { ResetStatsCard } from './ResetStatsCard';
 
-type Tab = 'overview' | 'quran' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
+type Tab = 'overview' | 'quran' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'aivideo' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
 
 interface UsageSummary {
   feature: 'tts' | 'dialogue' | 'tashkeel' | 'optimize' | 'script';
@@ -163,6 +164,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
     { id: 'keys', label: 'مفاتيح API', icon: KeyRound },
     { id: 'voices', label: 'البصمة الصوتية', icon: AudioLines },
     { id: 'motion', label: 'موشن جرافيك', icon: Clapperboard },
+    { id: 'aivideo', label: 'فيديو ذكاء اصطناعي', icon: Film },
     { id: 'moderation', label: 'الرقابة على المحتوى', icon: ShieldAlert },
     { id: 'settings', label: 'الإعدادات والتسعير', icon: Settings },
     { id: 'benchmark', label: 'اختبار الأداء', icon: FlaskConical },
@@ -199,6 +201,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
       {tab === 'keys' && <KeysTab />}
       {tab === 'voices' && <CustomVoicesTab />}
       {tab === 'motion' && <MotionTab admin />}
+      {tab === 'aivideo' && <AiVideoTab />}
       {tab === 'moderation' && <ModerationTab />}
       {tab === 'benchmark' && <BenchmarkTab />}
       {tab === 'jawwal' && <JawwalTab />}
