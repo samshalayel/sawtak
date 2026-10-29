@@ -129,7 +129,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
     try { localStorage.setItem('sawtik.onDevice', on ? '1' : '0'); } catch { /* storage disabled */ }
   };
   const [error, setError] = useState<{ text: string; needsCredits?: boolean } | null>(null);
-  const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
+  const [result, setResult] = useState<{ url: string; blob: Blob; onDevice?: boolean; seconds?: number } | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const preview = useRef<HTMLAudioElement | null>(null);
   const cancelled = useRef(false);
@@ -342,9 +342,10 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
           }
           const { renderGreetingOnDevice, canRenderOnDevice } = await import('../utils/clientRender');
           if (!(await canRenderOnDevice(data.plan.width, data.plan.height))) throw new Error('H.264 not supported');
+          const startedAt = Date.now();
           const blob = await renderGreetingOnDevice(data.plan, voice.base64, f => setProgress(Math.round(f * 100)), () => cancelled.current);
           if (cancelled.current) return;
-          setResult({ url: URL.createObjectURL(blob), blob });
+          setResult({ url: URL.createObjectURL(blob), blob, onDevice: true, seconds: Math.round((Date.now() - startedAt) / 100) / 10 });
           window.scrollTo({ top: 0, behavior: 'smooth' });
           return;
         } catch (err: any) {
@@ -451,6 +452,9 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
           <p className="text-xs text-slate-400">شاركها الآن أو حمّلها. لا نحتفظ بأي نسخة، فاحفظها قبل مغادرة الصفحة.</p>
         </div>
         <video src={result.url} controls autoPlay playsInline className="mx-auto max-h-[65vh] rounded-2xl bg-black shadow-2xl" />
+        <p className={`text-center text-[11px] ${result.onDevice ? 'text-emerald-300' : 'text-slate-500'}`}>
+          {result.onDevice ? `⚡ جُهّز على جهازك في ${result.seconds} ثانية` : 'جُهّز على الخادم'}
+        </p>
         <div className={`grid grid-cols-1 gap-2 ${isPhone ? 'sm:grid-cols-2' : ''}`}>
           {isPhone && (
             <button type="button" onClick={share} className="flex items-center justify-center gap-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-sm">
