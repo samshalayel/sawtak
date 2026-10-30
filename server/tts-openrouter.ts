@@ -69,6 +69,8 @@ export const CLONE_MODELS = [
   { id: 'heygen/heygen-voice-1', label: 'HeyGen Voice 1' },
   { id: 'bytedance-seed/seed-audio-1-0', label: 'Seed Audio 1.0' },
   { id: 'mistralai/voxtral-mini-tts-2603', label: 'Voxtral Mini TTS' },
+  // Not listed by OpenRouter as a cloning model: kept to see whether it takes a reference clip at all
+  { id: 'google/gemini-3.8-flash-lite-tts', label: 'Gemini Flash TTS (تجريبي)' },
 ];
 
 /**
