@@ -19,6 +19,8 @@ const {
 const { withGeminiFailover, hasUsableKeys } = await import('./server/keys.ts');
 const { elevenLabsEnabled, synthesizeElevenLabs } = await import('./server/tts-elevenlabs.ts');
 const { openRouterEnabled, synthesizeOpenRouter, synthesizeOpenRouterDialogue } = await import('./server/tts-openrouter.ts');
+// Automatic reels (admin) speak each scene with the studio's own voice chain
+(await import('./server/auto-reel.ts')).setAutoReelSpeech(async (text, voice, style) => (await synthesizeSpeech(text, voice, style)).wav);
 const { keepAudio, takeAudio } = await import('./server/audio-handoff.ts');
 const { VOICE_PREVIEWS } = await import('./server/voice-previews.ts');
 const { VOICES } = await import('./src/data/presets.ts');

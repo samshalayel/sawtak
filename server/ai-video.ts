@@ -207,7 +207,8 @@ aiVideoRouter.post('/generate', async (req, res) => {
 
 const lastPoll = new Map<string, number>();
 
-async function saveVideo(id: string, done: any) {
+/** Downloads a finished clip (`done`: OpenRouter's status answer) to `file` (its own folder by default). */
+export async function saveVideo(id: string, done: any, file = videoFile(id)) {
   const own = typeof done.unsigned_urls?.[0] === 'string' && !done.unsigned_urls[0].startsWith(new URL(base()).origin) ? done.unsigned_urls[0] : null;
   // The key is only ever sent to OpenRouter itself, not to wherever a signed link points
   const res = await fetch(own ?? `${base()}/videos/${id}/content?index=0`, {
@@ -216,7 +217,7 @@ async function saveVideo(id: string, done: any) {
   if (!res.ok) throw new Error(`download ${res.status}`);
   const bytes = Buffer.from(await res.arrayBuffer());
   if (bytes.length < 1000) throw new Error('empty video');
-  await fs.writeFile(videoFile(id), bytes);
+  await fs.writeFile(file, bytes);
 }
 
 aiVideoRouter.get('/jobs/:id', async (req, res) => {

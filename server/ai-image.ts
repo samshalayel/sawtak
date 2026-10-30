@@ -43,7 +43,7 @@ const getJson = async (url: string) => {
   return (await res.json())?.data ?? [];
 };
 
-async function imageModels(): Promise<Omit<ImageModel, 'lastCostUsd'>[]> {
+export async function imageModels(): Promise<Omit<ImageModel, 'lastCostUsd'>[]> {
   if (modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models;
   // The images API lists the models and their options; the prices are in the general model list
   const [list, priced]: any[][] = await Promise.all([
@@ -138,53 +138,69 @@ async function allJobs(): Promise<ImageJob[]> {
 const running = new Set<string>();
 
 /** The file type of picture bytes, from their first bytes. */
-const kindOf = (b: Buffer) =>
+const kindOf = (b: Buffer): Picture['ext'] | null =>
   b[0] === 0x89 && b[1] === 0x50 ? 'png' : b[0] === 0xff && b[1] === 0xd8 ? 'jpg' : b.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
 
 /** Asks OpenRouter for the picture and saves what comes back. */
+export interface Picture { bytes: Buffer; ext: 'png' | 'jpg' | 'webp' }
+
+/**
+ * One picture from an OpenRouter image model (also used by the auto reel pipeline). `references` are pictures the
+ * model works from (data URLs), on models that take them.
+ */
+export async function generatePicture(o: {
+  model: string; prompt: string; aspectRatio?: string; resolution?: string; references?: string[];
+}): Promise<{ pictures: Picture[]; costUsd?: number; note?: string }> {
+  const res = await fetch(`${base()}/images`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: o.model, prompt: o.prompt, n: 1,
+      ...(o.aspectRatio ? { aspect_ratio: o.aspectRatio } : {}),
+      ...(o.resolution ? { resolution: o.resolution } : {}),
+      ...(o.references?.length ? { input_references: o.references.map(url => ({ type: 'image_url', image_url: { url } })) } : {}),
+    }),
+    signal: AbortSignal.timeout(300_000),
+  });
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(String(data?.error?.message || data?.error || `HTTP ${res.status}`).slice(0, 300));
+  const cost = Number(data?.usage?.cost);
+  const items: any[] = Array.isArray(data?.data) ? data.data : [];
+  const note = items.map(i => i?.revised_prompt).find(t => typeof t === 'string' && t.trim())?.trim().slice(0, 500);
+  if (items.length === 0) throw new Error('لم يرجع النموذج صورة');
+
+  const pictures: Picture[] = [];
+  for (const item of items.slice(0, 4)) {
+    let bytes: Buffer;
+    if (typeof item?.b64_json === 'string') bytes = Buffer.from(item.b64_json.replace(/^data:[^,]*,/, ''), 'base64');
+    else if (typeof item?.url === 'string') {
+      const inline = item.url.match(/^data:[^,]*;base64,(.*)$/s);
+      if (inline) bytes = Buffer.from(inline[1], 'base64');
+      else {
+        // A link instead of the bytes: fetched without the key
+        const r = await fetch(item.url, { signal: AbortSignal.timeout(60_000) });
+        if (!r.ok) continue;
+        bytes = Buffer.from(await r.arrayBuffer());
+      }
+    } else continue;
+    const ext = kindOf(bytes);
+    if (ext) pictures.push({ bytes, ext });
+  }
+  if (pictures.length === 0) throw new Error('تعذّر حفظ الصورة');
+  return { pictures, costUsd: Number.isFinite(cost) && cost > 0 ? cost : undefined, note };
+}
+
 async function run(job: ImageJob, editDataUrl: string | null) {
   try {
-    const res = await fetch(`${base()}/images`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: job.model, prompt: job.prompt, n: 1,
-        ...(job.aspectRatio ? { aspect_ratio: job.aspectRatio } : {}),
-        ...(job.resolution ? { resolution: job.resolution } : {}),
-        ...(editDataUrl ? { input_references: [{ type: 'image_url', image_url: { url: editDataUrl } }] } : {}),
-      }),
-      signal: AbortSignal.timeout(300_000),
+    const result = await generatePicture({
+      model: job.model, prompt: job.prompt, aspectRatio: job.aspectRatio || undefined, resolution: job.resolution,
+      references: editDataUrl ? [editDataUrl] : undefined,
     });
-    const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(String(data?.error?.message || data?.error || `HTTP ${res.status}`).slice(0, 300));
-    const cost = Number(data?.usage?.cost);
-    if (Number.isFinite(cost) && cost > 0) job.costUsd = cost;
-    const items: any[] = Array.isArray(data?.data) ? data.data : [];
-    job.note = items.map(i => i?.revised_prompt).find(t => typeof t === 'string' && t.trim())?.trim().slice(0, 500);
-    if (items.length === 0) throw new Error('لم يرجع النموذج صورة');
-
-    let saved = 0;
-    for (const item of items.slice(0, 4)) {
-      let bytes: Buffer;
-      if (typeof item?.b64_json === 'string') bytes = Buffer.from(item.b64_json.replace(/^data:[^,]*,/, ''), 'base64');
-      else if (typeof item?.url === 'string') {
-        const inline = item.url.match(/^data:[^,]*;base64,(.*)$/s);
-        if (inline) bytes = Buffer.from(inline[1], 'base64');
-        else {
-          // A link instead of the bytes: fetched without the key
-          const r = await fetch(item.url, { signal: AbortSignal.timeout(60_000) });
-          if (!r.ok) continue;
-          bytes = Buffer.from(await r.arrayBuffer());
-        }
-      } else continue;
-      const ext = kindOf(bytes);
-      if (!ext) continue;
-      job.ext = ext;
-      await fs.writeFile(imageFile(job.id, saved, ext), bytes);
-      saved++;
-    }
-    if (saved === 0) throw new Error('تعذّر حفظ الصورة');
-    job.files = saved;
+    job.costUsd = result.costUsd;
+    job.note = result.note;
+    for (const [i, p] of result.pictures.entries()) await fs.writeFile(imageFile(job.id, i, p.ext), p.bytes);
+    job.ext = result.pictures[0].ext;
+    job.files = result.pictures.length;
     job.status = 'completed';
   } catch (error: any) {
     console.error('Image generate failed:', error?.message || error);
