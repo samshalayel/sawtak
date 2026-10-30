@@ -7,9 +7,13 @@ import { spawn } from 'child_process';
 import { db } from './db.ts';
 import { ApiKeyRow, withPinnedKey } from './keys.ts';
 import { logUsage } from './credits.ts';
+import { CLONE_MODELS, cloneSpeech } from './tts-openrouter.ts';
+import { wavFromPcm } from './tts-elevenlabs.ts';
 
 // Custom voice avatars ("voice replication"): Gemini clones a speaker from a 10–30 s reference clip plus a
 // recording of the same speaker reading Google's consent statement. Admin-only for now (trial phase).
+// Alternatively through OpenRouter's cloning models: nothing is created there, the cleaned reference clip kept here
+// is sent with every request (those voices have an `openrouter-` id and no API key).
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Model used to speak with custom voices (same one as the rest of the studio)
@@ -138,6 +142,30 @@ function extractAudio(data: any): { data: string; mimeType?: string } | null {
   return last ? { data: last.data, mimeType: last.mime_type } : null;
 }
 
+const isOpenRouterVoice = (voice: CustomVoiceRow) => voice.voice_id.startsWith('openrouter-');
+
+/** Speaks `text` with an OpenRouter voice: its stored reference clip and a cloning model (its own unless `model` is given). */
+async function speakWithOpenRouter(voice: CustomVoiceRow, text: string, style: string, model?: string) {
+  const reference = await fs.readFile(referencePath(voice.id));
+  const useModel = CLONE_MODELS.some(m => m.id === model) ? model! : voice.model;
+  const { audio, format } = await cloneSpeech(useModel, text, reference, style);
+  let wav: Buffer;
+  if (format === 'pcm') wav = wavFromPcm(audio, 24000);
+  else {
+    // Same WAV as the rest of the studio (24 kHz mono)
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sawtik-voice-'));
+    try {
+      await fs.writeFile(path.join(dir, 'in'), audio);
+      await runFfmpeg(['-i', path.join(dir, 'in'), ...OUTPUT_ARGS, path.join(dir, 'out.wav')]);
+      wav = await fs.readFile(path.join(dir, 'out.wav'));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+  db.prepare("UPDATE custom_voices SET use_count = use_count + 1, last_used_at = datetime('now') WHERE id = ?").run(voice.id);
+  return { wav, seconds: wavSeconds(wav), model: useModel };
+}
+
 function pcmToWav(pcm: Buffer, sampleRate = 24000): Buffer {
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
@@ -252,6 +280,7 @@ customVoicesRouter.get('/', (_req, res) => {
     consentStatement: CONSENT_STATEMENT_AR,
     minSeconds: MIN_REFERENCE_SECONDS,
     maxSeconds: MAX_REFERENCE_SECONDS,
+    openRouter: { enabled: Boolean(process.env.OPENROUTER_API_KEY), models: CLONE_MODELS },
   });
 });
 
@@ -265,19 +294,23 @@ customVoicesRouter.post('/', async (req, res) => {
   const name = String(req.body?.name || '').trim().slice(0, 40);
   const sources = (Array.isArray(req.body?.sources) ? req.body.sources : []).slice(0, 10).map(decodeClip).filter(Boolean) as Buffer[];
   const consent = decodeClip(req.body?.consent);
+  const viaOpenRouter = req.body?.provider === 'openrouter';
+  const cloneModel = String(req.body?.model || '');
 
   if (!name) return res.status(400).json({ success: false, error: 'اكتب اسماً للصوت' });
   if (sources.length === 0) return res.status(400).json({ success: false, error: 'ارفع ملفاً صوتياً واحداً على الأقل للمرجع' });
-  if (!consent) return res.status(400).json({ success: false, error: 'سجّل أو ارفع تسجيل جملة الموافقة' });
+  if (viaOpenRouter && !process.env.OPENROUTER_API_KEY) return res.status(400).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط في .env' });
+  if (viaOpenRouter && !CLONE_MODELS.some(m => m.id === cloneModel)) return res.status(400).json({ success: false, error: 'اختر نموذج النسخ' });
+  if (!consent && !viaOpenRouter) return res.status(400).json({ success: false, error: 'سجّل أو ارفع تسجيل جملة الموافقة' });
   if (req.body?.confirmOwnership !== true) {
     return res.status(400).json({ success: false, error: 'يجب التأكيد أن صاحب الصوت وافق على نسخه' });
   }
 
   let reference: Buffer;
-  let consentWav: Buffer;
+  let consentWav: Buffer | null = null;
   try {
     reference = await prepareAudio(sources, MAX_REFERENCE_SECONDS);
-    consentWav = await prepareAudio([consent], 20);
+    if (!viaOpenRouter) consentWav = await prepareAudio([consent!], 20);
   } catch (err) {
     return adminError(res, err, 'تعذّرت معالجة الملفات الصوتية');
   }
@@ -289,8 +322,19 @@ customVoicesRouter.post('/', async (req, res) => {
       error: `مدة الكلام الصافي في الملفات ${referenceSeconds.toFixed(1)} ثانية فقط بعد إزالة الصمت، والمطلوب ${MIN_REFERENCE_SECONDS} ثوانٍ على الأقل (الأفضل 30).`,
     });
   }
-  if (wavSeconds(consentWav) < 2) {
+  if (consentWav && wavSeconds(consentWav) < 2) {
     return res.status(400).json({ success: false, error: 'تسجيل الموافقة قصير جداً أو صامت' });
+  }
+
+  if (viaOpenRouter) {
+    const row = db.prepare(`
+      INSERT INTO custom_voices (voice_id, name, api_key_id, model, reference_seconds, created_by)
+      VALUES (?, ?, NULL, ?, ?, ?)
+    `).run(`openrouter-${crypto.randomBytes(6).toString('hex')}`, name, cloneModel, Math.round(referenceSeconds * 10) / 10, req.user!.id);
+    const id = Number(row.lastInsertRowid);
+    await fs.mkdir(VOICES_DIR, { recursive: true });
+    await fs.writeFile(referencePath(id), reference);
+    return res.json({ success: true, voice: getVoice(id), referenceSeconds });
   }
 
   try {
@@ -304,7 +348,7 @@ customVoicesRouter.post('/', async (req, res) => {
           display_name: `sawtik-${crypto.randomBytes(3).toString('hex')}`,
           replicated: {
             source_audio: { mime_type: 'audio/wav', data: reference.toString('base64') },
-            consent_audio: { mime_type: 'audio/wav', data: consentWav.toString('base64') },
+            consent_audio: { mime_type: 'audio/wav', data: consentWav!.toString('base64') },
           },
         },
       }, 180_000)
@@ -341,6 +385,18 @@ customVoicesRouter.post('/:id/speak', async (req, res) => {
   const style = String(req.body?.style || '').slice(0, 500);
   if (!text) return res.status(400).json({ success: false, error: 'اكتب نصاً للتجربة' });
   if (text.length > 3000) return res.status(400).json({ success: false, error: 'النص أطول من 3000 حرف' });
+
+  if (isOpenRouterVoice(voice)) {
+    try {
+      const result = await speakWithOpenRouter(voice, text, style, req.body?.model);
+      logUsage({ userId: req.user!.id, feature: 'tts', model: result.model, voice: voice.voice_id, chars: text.length,
+        // Priced by OpenRouter, not in Gemini tokens: the real cost shows in the OpenRouter card
+        promptTokens: 0, outputTokens: 0, audioSeconds: result.seconds });
+      return res.json({ success: true, audioBase64: result.wav.toString('base64'), durationSeconds: result.seconds, model: result.model });
+    } catch (err) {
+      return adminError(res, err, 'تعذّر التوليد عبر OpenRouter');
+    }
+  }
 
   try {
     const result = await speakWithCustomVoice(voice, text, style);

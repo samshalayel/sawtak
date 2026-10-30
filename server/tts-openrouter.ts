@@ -62,3 +62,44 @@ export function synthesizeOpenRouterDialogue(turns: DialogueTurn[], style: strin
   if (new Set(turns.map(t => t.voice)).size === 1) return requestSpeech({ input: turns.map(t => t.text).join('\n'), voice: turns[0].voice, instructions: style });
   return requestSpeech({ input: turns.map(t => ({ text: t.text, voice: t.voice })), instructions: style });
 }
+
+/** Voice-cloning models on OpenRouter (stateless: the reference clip goes with every request). */
+export const CLONE_MODELS = [
+  { id: 'fish-audio/s2.1-pro', label: 'Fish Audio S2.1 Pro' },
+  { id: 'heygen/heygen-voice-1', label: 'HeyGen Voice 1' },
+  { id: 'bytedance-seed/seed-audio-1-0', label: 'Seed Audio 1.0' },
+  { id: 'mistralai/voxtral-mini-tts-2603', label: 'Voxtral Mini TTS' },
+];
+
+/**
+ * `text` spoken in the voice of `referenceWav` by a cloning model. Returns the audio as the provider sent it:
+ * MP3 when it accepts that format, otherwise raw 24 kHz PCM.
+ */
+export async function cloneSpeech(model: string, text: string, referenceWav: Buffer, style: string): Promise<{ audio: Buffer; format: 'mp3' | 'pcm' }> {
+  if (!apiKey()) throw Object.assign(new Error('OPENROUTER_API_KEY is not set'), { status: 400 });
+  const url = `${process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1'}/audio/speech`;
+  const request = (format: 'mp3' | 'pcm') => withSlot(async () => {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model, input: text, response_format: format,
+          ...(style.trim() ? { instructions: style.trim() } : {}),
+          input_references: [{ type: 'input_audio', input_audio: { data: `data:audio/wav;base64,${referenceWav.toString('base64')}` } }],
+        }),
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (res.ok && !/json/i.test(res.headers.get('content-type') || '')) return Buffer.from(await res.arrayBuffer());
+      if ([429, 502, 503].includes(res.status) && attempt < RETRY_MS.length) { await sleep(RETRY_MS[attempt]); continue; }
+      throw Object.assign(new Error(`OpenRouter ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`), { status: res.status });
+    }
+  });
+  try {
+    return { audio: await request('mp3'), format: 'mp3' };
+  } catch (err: any) {
+    // Some providers only return raw PCM
+    if (err?.status === 400 && /format|mp3|pcm/i.test(err.message)) return { audio: await request('pcm'), format: 'pcm' };
+    throw err;
+  }
+}

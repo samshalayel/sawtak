@@ -3,12 +3,14 @@ import { AudioLines, Download, Loader2, Mic, Square, Trash2, Upload, Wand2, X } 
 import { api, card, date } from './adminShared';
 import { base64ToBlobUrl } from '../utils/audio';
 
-// Admin-only trial of Gemini voice replication: build a voice avatar from reference clips + a consent recording.
+// Admin-only trial of voice replication: a voice avatar from reference clips, either at Google (Gemini, with a consent
+// recording) or through OpenRouter's cloning models (the clip goes with every request, so a model can be swapped).
 
 interface CustomVoice {
   id: number;
   voice_id: string;
   name: string;
+  model: string;
   reference_seconds: number;
   use_count: number;
   last_used_at: string | null;
@@ -23,7 +25,10 @@ interface VoicesData {
   consentStatement: string;
   minSeconds: number;
   maxSeconds: number;
+  openRouter: { enabled: boolean; models: { id: string; label: string }[] };
 }
+
+const isOpenRouter = (voice: CustomVoice) => voice.voice_id.startsWith('openrouter-');
 
 interface Clip {
   id: string;
@@ -133,6 +138,9 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
   const [sources, setSources] = useState<Clip[]>([]);
   const [consent, setConsent] = useState<Clip | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [provider, setProvider] = useState<'openrouter' | 'google'>(data.openRouter.enabled ? 'openrouter' : 'google');
+  const [model, setModel] = useState(data.openRouter.models[0]?.id ?? '');
+  const viaOpenRouter = provider === 'openrouter';
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -152,7 +160,7 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
     setMessage(null);
     if (!name.trim()) return setMessage({ ok: false, text: 'اكتب اسماً للصوت' });
     if (sources.length === 0) return setMessage({ ok: false, text: 'أضف تسجيلاً مرجعياً واحداً على الأقل' });
-    if (!consent) return setMessage({ ok: false, text: 'سجّل جملة الموافقة بصوت نفس الشخص' });
+    if (!consent && !viaOpenRouter) return setMessage({ ok: false, text: 'سجّل جملة الموافقة بصوت نفس الشخص' });
     if (!confirmed) return setMessage({ ok: false, text: 'أكّد أن صاحب الصوت موافق على نسخه' });
     if (totalBytes > MAX_UPLOAD_BYTES) return setMessage({ ok: false, text: 'حجم الملفات كبير، يكفي 30 ثانية من الكلام الواضح' });
 
@@ -161,7 +169,8 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
       const body = {
         name: name.trim(),
         sources: await Promise.all(sources.map(c => blobToBase64(c.blob))),
-        consent: await blobToBase64(consent.blob),
+        consent: consent && !viaOpenRouter ? await blobToBase64(consent.blob) : undefined,
+        provider, model,
         confirmOwnership: true,
       };
       const res = await api<{ referenceSeconds: number }>('/api/admin/custom-voices', { method: 'POST', body: JSON.stringify(body) });
@@ -187,8 +196,35 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
       <div className="text-[11px] leading-relaxed text-slate-400 bg-slate-950/50 border border-slate-800 rounded-lg p-3">
         للحصول على أفضل شبه: سجّل في غرفة هادئة بدون موسيقى أو صدى، بكلام طبيعي متواصل بالأسلوب الذي تريده لاحقاً.
         المطلوب {data.minSeconds}–{data.maxSeconds} ثانية من الكلام الصافي (نأخذ أول {data.maxSeconds} ثانية بعد إزالة فترات الصمت).
-        سجّل جملة الموافقة بنفس المايكروفون وفي نفس المكان، لأن Google تتحقق أنها بصوت نفس الشخص.
+        {viaOpenRouter
+          ? 'مع OpenRouter يُرسل هذا التسجيل مع كل طلب توليد، فتستطيع تجربة نفس البصمة بأكثر من نموذج.'
+          : 'سجّل جملة الموافقة بنفس المايكروفون وفي نفس المكان، لأن Google تتحقق أنها بصوت نفس الشخص.'}
       </div>
+
+      {data.openRouter.enabled && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-slate-300">طريقة النسخ:</span>
+          {(['openrouter', 'google'] as const).map(p => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setProvider(p)}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold border ${provider === p ? 'bg-amber-500/15 border-amber-500/60 text-amber-200' : 'bg-slate-800 border-slate-700 text-slate-300'}`}
+            >
+              {p === 'openrouter' ? 'OpenRouter (بدون جملة موافقة)' : 'Google Gemini'}
+            </button>
+          ))}
+          {viaOpenRouter && (
+            <select
+              value={model}
+              onChange={e => setModel(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-100"
+            >
+              {data.openRouter.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          )}
+        </div>
+      )}
 
       <label className="block space-y-1">
         <span className="text-xs text-slate-300">اسم الصوت (يظهر في القائمة)</span>
@@ -229,7 +265,7 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
         )}
       </div>
 
-      <div className="space-y-2">
+      {!viaOpenRouter && <div className="space-y-2">
         <div className="text-xs font-bold text-white">2. جملة الموافقة (بصوت نفس الشخص)</div>
         <div className="text-base leading-loose text-amber-200 bg-amber-500/5 border border-amber-500/30 rounded-lg px-3 py-2">
           «{data.consentStatement}»
@@ -250,7 +286,7 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
           }} />
         </div>
         {consent && <ClipRow clip={consent} onRemove={() => setConsent(null)} />}
-      </div>
+      </div>}
 
       <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
         <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-0.5 accent-amber-500" />
@@ -278,22 +314,23 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
   );
 };
 
-const VoiceCard: React.FC<{ voice: CustomVoice; onDeleted: () => void }> = ({ voice, onDeleted }) => {
+const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']['models']; onDeleted: () => void }> = ({ voice, models, onDeleted }) => {
+  const [model, setModel] = useState(voice.model);
   const [text, setText] = useState('مرحباً، هذه تجربة لصوتي المنسوخ في استوديو صوتك الذكي. كيف يبدو لكم؟');
   const [style, setStyle] = useState('');
   const [busy, setBusy] = useState<'speak' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ url: string; seconds: number } | null>(null);
+  const [result, setResult] = useState<{ url: string; seconds: number; model?: string } | null>(null);
 
   const speak = async () => {
     setBusy('speak');
     setError(null);
     try {
-      const res = await api<{ audioBase64: string; durationSeconds: number }>(`/api/admin/custom-voices/${voice.id}/speak`, {
+      const res = await api<{ audioBase64: string; durationSeconds: number; model?: string }>(`/api/admin/custom-voices/${voice.id}/speak`, {
         method: 'POST',
-        body: JSON.stringify({ text, style }),
+        body: JSON.stringify({ text, style, model }),
       });
-      setResult({ url: base64ToBlobUrl(res.audioBase64, 'audio/wav'), seconds: res.durationSeconds });
+      setResult({ url: base64ToBlobUrl(res.audioBase64, 'audio/wav'), seconds: res.durationSeconds, model: res.model });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -302,7 +339,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; onDeleted: () => void }> = ({ vo
   };
 
   const remove = async () => {
-    if (!window.confirm(`حذف الصوت «${voice.name}» نهائياً من Google ومن النظام؟`)) return;
+    if (!window.confirm(`حذف الصوت «${voice.name}» نهائياً${isOpenRouter(voice) ? '' : ' من Google ومن النظام'}؟`)) return;
     setBusy('delete');
     try {
       await api(`/api/admin/custom-voices/${voice.id}`, { method: 'DELETE' });
@@ -320,7 +357,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; onDeleted: () => void }> = ({ vo
           <div className="text-white font-bold">{voice.name}</div>
           <div className="text-[11px] text-slate-500 mt-0.5">
             {voice.reference_seconds} ث مرجع · استُخدم {voice.use_count} مرة · أُنشئ {date(voice.created_at)}
-            {voice.key_label ? ` · المفتاح: ${voice.key_label}` : ' · المفتاح محذوف!'}
+            {isOpenRouter(voice) ? ' · OpenRouter' : voice.key_label ? ` · المفتاح: ${voice.key_label}` : ' · المفتاح محذوف!'}
           </div>
         </div>
         <button
@@ -351,6 +388,16 @@ const VoiceCard: React.FC<{ voice: CustomVoice; onDeleted: () => void }> = ({ vo
         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
       />
       <div className="flex items-center gap-3 flex-wrap">
+        {isOpenRouter(voice) && (
+          <select
+            value={model}
+            onChange={e => setModel(e.target.value)}
+            title="جرّب نفس البصمة بنموذج آخر"
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-100"
+          >
+            {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        )}
         <button
           type="button"
           onClick={speak}
@@ -367,7 +414,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; onDeleted: () => void }> = ({ vo
               download={`${voice.name}.wav`}
               className="flex items-center gap-1 text-xs text-slate-300 hover:text-amber-300"
             >
-              <Download className="w-3.5 h-3.5" /> تحميل ({result.seconds.toFixed(1)} ث)
+              <Download className="w-3.5 h-3.5" /> تحميل ({result.seconds.toFixed(1)} ث{result.model ? ` · ${models.find(m => m.id === result.model)?.label ?? result.model}` : ''})
             </a>
           </>
         )}
@@ -393,7 +440,7 @@ export const CustomVoicesTab: React.FC = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-          نسخ بصمة صوتية (أفاتار صوتي مخصص) عبر Gemini. هذه الصفحة للتجربة وخاصة بالإدارة فقط ولا تظهر للعملاء.
+          نسخ بصمة صوتية (أفاتار صوتي مخصص) عبر Gemini أو OpenRouter. هذه الصفحة للتجربة وخاصة بالإدارة فقط ولا تظهر للعملاء.
           التوليد هنا لا يخصم من رصيدك لكنه يُحسب في سجل الاستهلاك والتكلفة.
         </p>
         <span className="text-xs text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-1">
@@ -406,7 +453,7 @@ export const CustomVoicesTab: React.FC = () => {
       {data.voices.length > 0 && (
         <div className="space-y-3">
           <div className="text-sm font-bold text-white">الأصوات المنسوخة</div>
-          {data.voices.map(v => <VoiceCard key={v.id} voice={v} onDeleted={load} />)}
+          {data.voices.map(v => <VoiceCard key={v.id} voice={v} models={data.openRouter.models} onDeleted={load} />)}
         </div>
       )}
     </div>
