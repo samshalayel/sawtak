@@ -224,7 +224,13 @@ function gatewayTime(s: string): number {
 const MAX_DAYS = 31;
 
 // Admins: the gateway's transactions for a date range. search_trans only accepts one day (00:00 to 23:59 of the
-// same date), so the range is fetched day by day. Each one is matched to our own payment log.
+// same date), so the range is fetched day by day. Each one is matched to our own payment log. The merchant account
+// is shared with another platform (a partner's, with its own books), so every transaction gets a `source`:
+//   ours  — one of our payments (same Jawwal reference)
+//   check — not matched, but one of our attempts with no known outcome has the same amount and time: a customer may
+//           have paid without getting the points
+//   other — everything else (the other platform's payments, wallet movements)
+// and the totals count ours only.
 jawwalRouter.get('/transactions', requireAdmin, async (req: Request, res: Response) => {
   if (!enabled()) return res.status(503).json({ success: false, error: 'بوابة الدفع غير مفعّلة حالياً' });
   const from = new Date(`${String(req.query.from)}T00:00:00Z`);
@@ -250,12 +256,19 @@ jawwalRouter.get('/transactions', requireAdmin, async (req: Request, res: Respon
         const match = ours.find(p => p.tx_id && p.tx_id === String(t.reference))
           ?? ours.find(p => !p.tx_id && p.status === 'credited' && Math.abs(p.amount_ils - amount) < 0.001
             && Math.abs(Date.parse(p.created_at.replace(' ', 'T') + 'Z') - at) < 5 * 60_000);
+        const incoming = t.debitCreditFlag === 'CREDIT' && !t.isReversed;
+        const attempt = !match && incoming
+          ? ours.find(p => ['unknown', 'pending', 'charged_not_credited'].includes(p.status) && Math.abs(p.amount_ils - amount) < 0.001
+            && Math.abs(Date.parse(p.created_at.replace(' ', 'T') + 'Z') - at) < 15 * 60_000)
+          : undefined;
         txs.push({
           reference: String(t.reference), date: t.transDate, at, amount, fee: Number(t.chargePlusTax) || 0,
           flag: t.debitCreditFlag, status: t.processingStatus, reversed: !!t.isReversed, currency: t.currency,
           operation: t.localOperationName || t.latinOperationName || t.serviceName || '',
           counterparty: last4(t.debitCreditFlag === 'CREDIT' ? t.senderInfo : t.receiverInfo),
           payment: match ? { id: match.id, email: match.email, packageId: match.package_id, status: match.status } : null,
+          attempt: attempt ? { id: attempt.id, email: attempt.email, packageId: attempt.package_id, status: attempt.status } : null,
+          source: match ? 'ours' : attempt ? 'check' : 'other',
         });
       }
     } catch (e: any) {
@@ -264,9 +277,13 @@ jawwalRouter.get('/transactions', requireAdmin, async (req: Request, res: Respon
     }
   }
   txs.sort((a, b) => b.at - a.at);
-  const credits = txs.filter(t => t.flag === 'CREDIT' && !t.reversed);
+  const incoming = (source: string) => txs.filter(t => t.source === source && t.flag === 'CREDIT' && !t.reversed);
+  const mine = incoming('ours');
+  const others = incoming('other');
   res.json({
     success: true, mode: MODE, days, failedDays, txs,
-    totals: { count: credits.length, amount: credits.reduce((s, t) => s + t.amount, 0), fees: credits.reduce((s, t) => s + t.fee, 0) },
+    totals: { count: mine.length, amount: mine.reduce((s, t) => s + t.amount, 0), fees: mine.reduce((s, t) => s + t.fee, 0) },
+    others: { count: others.length, amount: others.reduce((s, t) => s + t.amount, 0) },
+    toCheck: incoming('check').length,
   });
 });
