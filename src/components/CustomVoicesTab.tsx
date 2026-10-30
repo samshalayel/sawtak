@@ -12,6 +12,7 @@ interface CustomVoice {
   name: string;
   model: string;
   reference_seconds: number;
+  reference_text: string | null;
   use_count: number;
   last_used_at: string | null;
   created_at: string;
@@ -316,6 +317,7 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
 
 const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']['models']; onDeleted: () => void }> = ({ voice, models, onDeleted }) => {
   const [model, setModel] = useState(voice.model);
+  const [transcript, setTranscript] = useState(voice.reference_text ?? '');
   const [text, setText] = useState('مرحباً، هذه تجربة لصوتي المنسوخ في استوديو صوتك الذكي. كيف يبدو لكم؟');
   const [style, setStyle] = useState('');
   const [busy, setBusy] = useState<'speak' | 'delete' | null>(null);
@@ -328,7 +330,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
     try {
       const res = await api<{ audioBase64: string; durationSeconds: number; model?: string }>(`/api/admin/custom-voices/${voice.id}/speak`, {
         method: 'POST',
-        body: JSON.stringify({ text, style, model }),
+        body: JSON.stringify({ text, style, model, ...(isOpenRouter(voice) ? { transcript } : {}) }),
       });
       setResult({ url: base64ToBlobUrl(res.audioBase64, 'audio/wav'), seconds: res.durationSeconds, model: res.model });
     } catch (e: any) {
@@ -374,6 +376,19 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
         <span className="whitespace-nowrap">التسجيل الأصلي (بعد التنظيف):</span>
         <audio src={`/api/admin/custom-voices/${voice.id}/reference`} controls preload="none" className="h-8 w-56" />
       </div>
+
+      {isOpenRouter(voice) && (
+        <label className="block space-y-1">
+          <span className="text-[11px] text-slate-400">نص التسجيل الأصلي حرفياً (اختياري، يحسّن الشبه كثيراً مع Fish Audio؛ يُحفظ مع البصمة)</span>
+          <textarea
+            value={transcript}
+            onChange={e => setTranscript(e.target.value)}
+            rows={2}
+            placeholder="اكتب بالضبط ما يُقال في التسجيل الأصلي أعلاه"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+          />
+        </label>
+      )}
 
       <textarea
         value={text}

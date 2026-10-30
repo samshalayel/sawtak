@@ -41,6 +41,10 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+// What is said in the reference clip, sent along with it to OpenRouter's cloning models
+if (!(db.prepare('PRAGMA table_info(custom_voices)').all() as { name: string }[]).some(c => c.name === 'reference_text')) {
+  db.exec('ALTER TABLE custom_voices ADD COLUMN reference_text TEXT');
+}
 
 interface CustomVoiceRow {
   id: number;
@@ -49,6 +53,7 @@ interface CustomVoiceRow {
   api_key_id: number | null;
   model: string;
   reference_seconds: number;
+  reference_text: string | null;
   created_by: number | null;
   use_count: number;
   last_used_at: string | null;
@@ -148,7 +153,7 @@ const isOpenRouterVoice = (voice: CustomVoiceRow) => voice.voice_id.startsWith('
 async function speakWithOpenRouter(voice: CustomVoiceRow, text: string, style: string, model?: string) {
   const reference = await fs.readFile(referencePath(voice.id));
   const useModel = CLONE_MODELS.some(m => m.id === model) ? model! : voice.model;
-  const { audio, format } = await cloneSpeech(useModel, text, reference, style);
+  const { audio, format } = await cloneSpeech(useModel, text, reference, style, voice.reference_text ?? '');
   let wav: Buffer;
   if (format === 'pcm') wav = wavFromPcm(audio, 24000);
   else {
@@ -387,6 +392,10 @@ customVoicesRouter.post('/:id/speak', async (req, res) => {
   if (text.length > 3000) return res.status(400).json({ success: false, error: 'النص أطول من 3000 حرف' });
 
   if (isOpenRouterVoice(voice)) {
+    if (typeof req.body?.transcript === 'string') {
+      voice.reference_text = req.body.transcript.trim().slice(0, 2000) || null;
+      db.prepare('UPDATE custom_voices SET reference_text = ? WHERE id = ?').run(voice.reference_text, voice.id);
+    }
     try {
       const result = await speakWithOpenRouter(voice, text, style, req.body?.model);
       logUsage({ userId: req.user!.id, feature: 'tts', model: result.model, voice: voice.voice_id, chars: text.length,

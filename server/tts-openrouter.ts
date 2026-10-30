@@ -74,10 +74,10 @@ export const CLONE_MODELS = [
 ];
 
 /**
- * `text` spoken in the voice of `referenceWav` by a cloning model. Returns the audio as the provider sent it:
+ * `text` spoken in the voice of `referenceWav` (optionally with its `transcript`) by a cloning model. Returns the audio as the provider sent it:
  * MP3 when it accepts that format, otherwise raw 24 kHz PCM.
  */
-export async function cloneSpeech(model: string, text: string, referenceWav: Buffer, style: string): Promise<{ audio: Buffer; format: 'mp3' | 'pcm' }> {
+export async function cloneSpeech(model: string, text: string, referenceWav: Buffer, style: string, transcript = ''): Promise<{ audio: Buffer; format: 'mp3' | 'pcm' }> {
   if (!apiKey()) throw Object.assign(new Error('OPENROUTER_API_KEY is not set'), { status: 400 });
   const url = `${process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1'}/audio/speech`;
   const request = (format: 'mp3' | 'pcm') => withSlot(async () => {
@@ -88,7 +88,11 @@ export async function cloneSpeech(model: string, text: string, referenceWav: Buf
         body: JSON.stringify({
           model, input: text, response_format: format,
           ...(style.trim() ? { instructions: style.trim() } : {}),
-          input_references: [{ type: 'input_audio', input_audio: { data: `data:audio/wav;base64,${referenceWav.toString('base64')}` } }],
+          input_references: [
+            { type: 'input_audio', input_audio: { data: `data:audio/wav;base64,${referenceWav.toString('base64')}` } },
+            // What is said in the clip, word for word: Fish Audio matches the voice much more closely with it
+            ...(transcript.trim() ? [{ type: 'text', text: transcript.trim() }] : []),
+          ],
         }),
         signal: AbortSignal.timeout(180_000),
       });
