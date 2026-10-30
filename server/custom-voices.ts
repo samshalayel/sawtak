@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import { db } from './db.ts';
 import { ApiKeyRow, withPinnedKey } from './keys.ts';
 import { logUsage } from './credits.ts';
-import { CLONE_MODELS, cloneSpeech } from './tts-openrouter.ts';
+import { CLONE_MODELS, cloneSpeech, transcribe } from './tts-openrouter.ts';
 import { wavFromPcm } from './tts-elevenlabs.ts';
 
 // Custom voice avatars ("voice replication"): Gemini clones a speaker from a 10–30 s reference clip plus a
@@ -339,7 +339,13 @@ customVoicesRouter.post('/', async (req, res) => {
     const id = Number(row.lastInsertRowid);
     await fs.mkdir(VOICES_DIR, { recursive: true });
     await fs.writeFile(referencePath(id), reference);
-    return res.json({ success: true, voice: getVoice(id), referenceSeconds });
+    // The clip's transcript makes the clone much closer; without it the voice still works, so a failure only warns
+    const transcript = await transcribe(reference).catch(err => {
+      console.warn('[custom-voices] transcription failed:', err?.message);
+      return null;
+    });
+    if (transcript) db.prepare('UPDATE custom_voices SET reference_text = ? WHERE id = ?').run(transcript.slice(0, 2000), id);
+    return res.json({ success: true, voice: getVoice(id), referenceSeconds, transcribed: Boolean(transcript) });
   }
 
   try {
@@ -418,6 +424,19 @@ customVoicesRouter.post('/:id/speak', async (req, res) => {
     res.json({ success: true, audioBase64: result.wav.toString('base64'), durationSeconds: result.seconds });
   } catch (err) {
     adminError(res, err, 'تعذّر التوليد بهذا الصوت');
+  }
+});
+
+// Transcribes the stored reference clip again (for voices made before, or to start over after editing)
+customVoicesRouter.post('/:id/transcribe', async (req, res) => {
+  const voice = getVoice(Number(req.params.id));
+  if (!voice) return res.status(404).json({ success: false, error: 'الصوت غير موجود' });
+  try {
+    const transcript = (await transcribe(await fs.readFile(referencePath(voice.id)))).slice(0, 2000);
+    db.prepare('UPDATE custom_voices SET reference_text = ? WHERE id = ?').run(transcript, voice.id);
+    res.json({ success: true, transcript });
+  } catch (err) {
+    adminError(res, err, 'تعذّر استخراج النص');
   }
 });
 

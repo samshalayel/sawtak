@@ -109,3 +109,36 @@ export async function cloneSpeech(model: string, text: string, referenceWav: Buf
     throw err;
   }
 }
+
+/**
+ * What is said in a WAV clip, word for word, by an audio-understanding model on OpenRouter (OPENROUTER_STT_MODEL,
+ * default Gemini Flash): used as the transcript of a cloned voice's reference clip.
+ */
+export async function transcribe(wav: Buffer): Promise<string> {
+  if (!apiKey()) throw Object.assign(new Error('OPENROUTER_API_KEY is not set'), { status: 400 });
+  const res = await fetch(`${process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1'}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: process.env.OPENROUTER_STT_MODEL || 'google/gemini-2.5-flash',
+      temperature: 0,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'Transcribe this audio exactly, word for word, in the language and dialect actually spoken (do not translate, '
+              + 'correct or summarise). Return only the transcript, with no notes or timestamps.',
+          },
+          { type: 'input_audio', input_audio: { data: wav.toString('base64'), format: 'wav' } },
+        ],
+      }],
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(`OpenRouter ${res.status}: ${data?.error?.message || ''}`.trim()), { status: res.status });
+  const text = String(data?.choices?.[0]?.message?.content ?? '').trim();
+  if (!text) throw new Error('Empty transcript');
+  return text;
+}

@@ -174,8 +174,11 @@ const CreateVoiceForm: React.FC<{ data: VoicesData; onCreated: () => void }> = (
         provider, model,
         confirmOwnership: true,
       };
-      const res = await api<{ referenceSeconds: number }>('/api/admin/custom-voices', { method: 'POST', body: JSON.stringify(body) });
-      setMessage({ ok: true, text: `تم إنشاء الصوت «${name.trim()}» من ${res.referenceSeconds.toFixed(1)} ثانية من الكلام. جرّبه من القائمة.` });
+      const res = await api<{ referenceSeconds: number; transcribed?: boolean }>('/api/admin/custom-voices', { method: 'POST', body: JSON.stringify(body) });
+      const note = viaOpenRouter
+        ? res.transcribed ? ' استُخرج نص التسجيل تلقائياً، راجعه في بطاقة الصوت.' : ' تعذّر استخراج نص التسجيل تلقائياً، اكتبه في بطاقة الصوت.'
+        : '';
+      setMessage({ ok: true, text: `تم إنشاء الصوت «${name.trim()}» من ${res.referenceSeconds.toFixed(1)} ثانية من الكلام. جرّبه من القائمة.${note}` });
       setName('');
       setSources([]);
       setConsent(null);
@@ -320,7 +323,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
   const [transcript, setTranscript] = useState(voice.reference_text ?? '');
   const [text, setText] = useState('مرحباً، هذه تجربة لصوتي المنسوخ في استوديو صوتك الذكي. كيف يبدو لكم؟');
   const [style, setStyle] = useState('');
-  const [busy, setBusy] = useState<'speak' | 'delete' | null>(null);
+  const [busy, setBusy] = useState<'speak' | 'delete' | 'transcribe' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ url: string; seconds: number; model?: string } | null>(null);
 
@@ -333,6 +336,19 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
         body: JSON.stringify({ text, style, model, ...(isOpenRouter(voice) ? { transcript } : {}) }),
       });
       setResult({ url: base64ToBlobUrl(res.audioBase64, 'audio/wav'), seconds: res.durationSeconds, model: res.model });
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const autoTranscribe = async () => {
+    setBusy('transcribe');
+    setError(null);
+    try {
+      const res = await api<{ transcript: string }>(`/api/admin/custom-voices/${voice.id}/transcribe`, { method: 'POST' });
+      setTranscript(res.transcript);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -379,7 +395,17 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
 
       {isOpenRouter(voice) && (
         <label className="block space-y-1">
-          <span className="text-[11px] text-slate-400">نص التسجيل الأصلي حرفياً (اختياري، يحسّن الشبه كثيراً مع Fish Audio؛ يُحفظ مع البصمة)</span>
+          <span className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] text-slate-400">نص التسجيل الأصلي حرفياً (يحسّن الشبه كثيراً مع Fish Audio؛ يُحفظ مع البصمة)</span>
+            <button
+              type="button"
+              onClick={autoTranscribe}
+              disabled={busy !== null}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] text-amber-200 border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {busy === 'transcribe' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />} استخرج النص تلقائياً
+            </button>
+          </span>
           <textarea
             value={transcript}
             onChange={e => setTranscript(e.target.value)}
