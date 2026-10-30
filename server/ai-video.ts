@@ -27,6 +27,7 @@ export interface VideoModel {
   durations: number[];
   audio: boolean;           // can make sound too (generate_audio)
   firstFrame: boolean;      // can start from a picture
+  needsImage: boolean;      // only animates a picture: a first frame is required
   /** USD per second at each resolution, with and without sound (null: priced another way, e.g. tokens). */
   prices: Record<string, { silent: number | null; sound: number | null }>;
   /** USD for each picture used as input, when the model charges for it. */
@@ -49,6 +50,13 @@ export function perSecond(skus: Record<string, string>, resolution: string, soun
 }
 
 let modelCache: { at: number; models: VideoModel[] } | null = null;
+// Models that turned out to need a picture (OpenRouter's list does not say so): learnt from their refusal
+const needImage = new Set<string>();
+
+/** A description that offers image-to-video but never text-to-video, e.g. "It supports image to video and…". */
+const imageOnly = (description: string) =>
+  /image[ -]to[ -]video/i.test(description) && !/text[ -]to[ -]video|from (?:a )?text|text prompts?/i.test(description);
+const withLearnt = (m: VideoModel): VideoModel => (needImage.has(m.id) ? { ...m, needsImage: true } : m);
 
 export async function videoModels(): Promise<VideoModel[]> {
   if (modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models;
@@ -67,6 +75,7 @@ export async function videoModels(): Promise<VideoModel[]> {
         id: m.id, name: String(m.name || m.id).replace(/^[^:]+:\s*/, ''),
         resolutions: m.supported_resolutions, aspectRatios: m.supported_aspect_ratios, durations: m.supported_durations,
         audio: m.generate_audio === true, firstFrame: Array.isArray(m.supported_frame_images) && m.supported_frame_images.includes('first_frame'),
+        needsImage: imageOnly(String(m.description || '')),
         prices, imageUsd: Number.isFinite(imageCents) ? imageCents / 100 : 0,
       };
     })
@@ -81,7 +90,7 @@ const cheapest = (m: VideoModel) => Math.min(Infinity, ...Object.values(m.prices
 aiVideoRouter.get('/models', async (_req, res) => {
   if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
   try {
-    res.json({ success: true, models: await videoModels() });
+    res.json({ success: true, models: (await videoModels()).map(withLearnt) });
   } catch (error: any) {
     console.error('Video models failed:', error?.message || error);
     res.status(502).json({ success: false, error: 'تعذّر جلب قائمة النماذج من OpenRouter' });
@@ -132,7 +141,8 @@ aiVideoRouter.post('/generate', async (req, res) => {
   try {
     if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
     const b = req.body ?? {};
-    const model = (await videoModels()).find(m => m.id === b.model);
+    const found = (await videoModels()).find(m => m.id === b.model);
+    const model = found && withLearnt(found);
     if (!model) return res.status(400).json({ success: false, error: 'النموذج غير موجود في القائمة' });
     const prompt = String(b.prompt || '').trim().slice(0, 2000);
     if (prompt.length < 5) return res.status(400).json({ success: false, error: 'اكتب وصف المشهد' });
@@ -147,6 +157,7 @@ aiVideoRouter.post('/generate', async (req, res) => {
     if (image && (!model.firstFrame || b.imageDataUrl.length > MAX_IMAGE_BYTES * 1.4)) {
       return res.status(400).json({ success: false, error: model.firstFrame ? 'الصورة أكبر من 4 ميغابايت' : 'هذا النموذج لا يبدأ من صورة' });
     }
+    if (!image && model.needsImage) return res.status(400).json({ success: false, error: 'هذا النموذج يحرّك صورة فقط: أضف صورة البداية' });
 
     // What it will cost, before anything is spent
     const rate = model.prices[resolution]?.[sound ? 'sound' : 'silent'] ?? null;
@@ -175,7 +186,10 @@ aiVideoRouter.post('/generate', async (req, res) => {
     const id = safeId(answer.id);
     if (!submit.ok || !id) {
       console.error('Video request refused:', submit.status, JSON.stringify(answer).slice(0, 400));
-      return res.status(502).json({ success: false, error: `رفض OpenRouter الطلب: ${String(answer?.error?.message || answer?.error || submit.status).slice(0, 200)}` });
+      const reason = String(answer?.error?.message || answer?.error || submit.status).slice(0, 200);
+      if (!image && /frame_images|first_frame/i.test(reason)) needImage.add(model.id);
+      // Our own 4xx/500, not 502: a gateway in front of the site may swap a 502 for its own page and hide the reason
+      return res.status(submit.status >= 400 && submit.status < 500 ? 400 : 500).json({ success: false, error: `رفض OpenRouter الطلب: ${reason}` });
     }
     const job: VideoJob = {
       id, model: model.id, modelName: model.name, prompt, resolution, aspectRatio, duration, sound, image, estimateUsd,

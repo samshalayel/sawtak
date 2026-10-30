@@ -10,6 +10,7 @@ interface VideoModel {
   durations: number[];
   audio: boolean;
   firstFrame: boolean;
+  needsImage: boolean;
   prices: Record<string, { silent: number | null; sound: number | null }>;
   imageUsd: number;
 }
@@ -167,7 +168,7 @@ export const AiVideoTab: React.FC = () => {
             <select value={modelId} onChange={e => setModelId(e.target.value)} className={field}>
               {models!.map(m => (
                 <option key={m.id} value={m.id} disabled={!Number.isFinite(Math.min(...Object.values(m.prices).map(p => p.silent ?? Infinity)))}>
-                  {m.name} — {fromPrice(m)}
+                  {m.name} — {fromPrice(m)}{m.needsImage ? ' · من صورة فقط' : ''}
                 </option>
               ))}
             </select>
@@ -215,7 +216,7 @@ export const AiVideoTab: React.FC = () => {
 
           {model.firstFrame && (
             <label className="block">
-              <span className={label}>صورة البداية (اختياري، لتحريك صورة)</span>
+              <span className={label}>{model.needsImage ? 'صورة البداية (مطلوبة: هذا النموذج يحرّك صورة فقط)' : 'صورة البداية (اختياري، لتحريك صورة)'}</span>
               <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => pickImage(e.target.files?.[0])} className="mt-1 block text-xs text-slate-300" />
               {image && <img src={image} alt="" className="mt-2 h-20 rounded-lg border border-slate-700" />}
             </label>
@@ -225,7 +226,7 @@ export const AiVideoTab: React.FC = () => {
             <button
               type="button"
               onClick={generate}
-              disabled={busy || estimate === null || prompt.trim().length < 5 || Boolean(active && !done(active))}
+              disabled={busy || estimate === null || prompt.trim().length < 5 || (model.needsImage && !image) || Boolean(active && !done(active))}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-bold disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Film className="w-4 h-4" />}
