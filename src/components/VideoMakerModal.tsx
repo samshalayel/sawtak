@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Film, Loader2, Download, ImagePlus, UserRound, Square, RectangleVertical, RectangleHorizontal } from 'lucide-react';
 import { postRender } from '../utils/postRender';
+import { waitForJob } from '../utils/waitForJob';
 
 type VideoFormat = 'square' | 'vertical' | 'landscape';
 
@@ -70,20 +71,16 @@ export const VideoMakerModal: React.FC<VideoMakerModalProps> = ({ audioBase64, a
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.jobId) throw new Error(data.error || 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.');
 
-      // Poll the background job until the MP4 is ready
-      while (!cancelled.current) {
-        await new Promise(r => setTimeout(r, 1000));
-        const statusRes = await fetch(`/api/video/jobs/${data.jobId}`);
-        const job = await statusRes.json().catch(() => ({}));
-        if (!statusRes.ok) throw new Error(job.error || 'تعذّر متابعة تجهيز الفيديو');
-        if (job.status === 'error') throw new Error(job.error);
-        setProgress({ percent: Math.round((job.progress || 0) * 100), ahead: job.ahead || 0, status: job.status });
-        if (job.status === 'done') {
-          const fileRes = await fetch(`/api/video/jobs/${data.jobId}/file`);
-          if (!fileRes.ok) throw new Error('تعذّر تحميل الفيديو');
-          setVideoUrl(URL.createObjectURL(await fileRes.blob()));
-          break;
-        }
+      // Follow the background job until the MP4 is ready
+      const ready = await waitForJob(data.jobId, {
+        intervalMs: 1000,
+        isCancelled: () => cancelled.current,
+        onUpdate: job => setProgress({ percent: Math.round((job.progress || 0) * 100), ahead: job.ahead || 0, status: job.status ?? 'queued' }),
+      });
+      if (ready) {
+        const fileRes = await fetch(`/api/video/jobs/${data.jobId}/file`);
+        if (!fileRes.ok) throw new Error('تعذّر تحميل الفيديو');
+        setVideoUrl(URL.createObjectURL(await fileRes.blob()));
       }
     } catch (err: any) {
       setError(err instanceof TypeError || !err?.message ? 'تعذّر الاتصال حالياً، يرجى المحاولة لاحقاً.' : err.message);

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Download, Image as ImageIcon, Loader2, Mic, Pause, Play, Share2, ShieldCheck, Sparkles, Stethoscope, Video, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
+import { waitForJob } from '../utils/waitForJob';
 import { AuthUser, ServicePrices } from '../types/auth';
 import { DoctorProfile, MEDICAL_DISCLAIMER, MEDICAL_LIMITS, MEDICAL_SCENES, MEDICAL_THEMES, ReviewNote, ReviewResult } from '../data/medical';
 
@@ -190,19 +191,11 @@ export const MedicalPage: React.FC<Props> = ({ user, prices, onLoginRequired, on
       const job = await res.json().catch(() => ({}));
       if (typeof job.balance === 'number') onBalance(job.balance);
       if (!res.ok || !job.jobId) throw Object.assign(new Error(job.error || 'تعذّر تجهيز الريل'), { credits: job.code === 'INSUFFICIENT_CREDITS' });
-      for (;;) {
-        await new Promise(r => setTimeout(r, 1500));
-        const s = await fetch(`/api/video/jobs/${job.jobId}`).then(r => r.json()).catch(() => ({}));
-        if (s.status === 'error' || s.success === false) throw new Error(s.error || 'تعذّر تجهيز الريل');
-        setProgress(Math.round((s.progress || 0) * 100));
-        if (s.status === 'done') {
-          const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
-          if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
-          const blob = await file.blob();
-          setReel({ url: URL.createObjectURL(blob), blob });
-          break;
-        }
-      }
+      await waitForJob(job.jobId, { onUpdate: s => setProgress(Math.round((s.progress || 0) * 100)) });
+      const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
+      if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
+      const blob = await file.blob();
+      setReel({ url: URL.createObjectURL(blob), blob });
     } catch (e: any) {
       setError({ text: e instanceof TypeError ? 'تعذّر الاتصال حالياً، يرجى المحاولة لاحقاً.' : e.message, credits: e?.credits });
     } finally {

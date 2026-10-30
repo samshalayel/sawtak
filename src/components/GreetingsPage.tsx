@@ -9,6 +9,7 @@ import {
 import { AuthUser, ServicePrices } from '../types/auth';
 import { estimateDuration } from '../utils/audio';
 import { postRender } from '../utils/postRender';
+import { waitForJob } from '../utils/waitForJob';
 import { AudioTagBar } from './AudioTagBar';
 
 // Voice greetings: occasion → name → message → voice → (photo / own template) → 9:16 video to share.
@@ -119,6 +120,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
 
   const [stage, setStage] = useState<Stage>('idle');
   const [progress, setProgress] = useState(0);
+  const [ahead, setAhead] = useState(0); // videos before this one in the server's line
   // Put the video together on this device instead of the server (browsers that can encode H.264; a trial option)
   const canOnDevice = typeof VideoEncoder !== 'undefined' && typeof createImageBitmap !== 'undefined';
   const [onDevice, setOnDevice] = useState(() => {
@@ -294,6 +296,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
     setResult(null);
     setStage('voice');
     setProgress(0);
+    setAhead(0);
     try {
       // 1. The voice: charged as a greeting card (the card price covers the voice and the video)
       const ttsRes = await fetch('/api/tts/generate', {
@@ -359,20 +362,17 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
       const job = await videoRes.json().catch(() => ({}));
       if (!videoRes.ok || !job.jobId) throw new Error(job.error || 'تعذّر تجهيز الفيديو، يرجى المحاولة لاحقاً.');
 
-      while (!cancelled.current) {
-        await new Promise(r => setTimeout(r, 1000));
-        const statusRes = await fetch(`/api/video/jobs/${job.jobId}`);
-        const status = await statusRes.json().catch(() => ({}));
-        if (!statusRes.ok || status.status === 'error') throw new Error(status.error || 'تعذّر تجهيز الفيديو');
-        setProgress(Math.round((status.progress || 0) * 100));
-        if (status.status === 'done') {
-          const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
-          if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
-          const blob = await file.blob();
-          setResult({ url: URL.createObjectURL(blob), blob });
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-          break;
-        }
+      const ready = await waitForJob(job.jobId, {
+        intervalMs: 1000,
+        isCancelled: () => cancelled.current,
+        onUpdate: s => { setProgress(Math.round((s.progress || 0) * 100)); setAhead(s.status === 'queued' ? s.ahead || 0 : 0); },
+      });
+      if (ready) {
+        const file = await fetch(`/api/video/jobs/${job.jobId}/file`);
+        if (!file.ok) throw new Error('تعذّر تحميل الفيديو');
+        const blob = await file.blob();
+        setResult({ url: URL.createObjectURL(blob), blob });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err: any) {
       setError({
@@ -759,7 +759,7 @@ export const GreetingsPage: React.FC<GreetingsPageProps> = ({ user, prices, onLo
       {busy && (
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-slate-300">
-            <span>{stage === 'voice' ? 'نسجّل التهنئة بالصوت…' : onDevice && canOnDevice ? 'نجهّز الفيديو على جهازك…' : 'نجهّز الفيديو…'}</span>
+            <span>{stage === 'voice' ? 'نسجّل التهنئة بالصوت…' : onDevice && canOnDevice ? 'نجهّز الفيديو على جهازك…' : ahead > 0 ? `بالدور: قبلك ${ahead} فيديو…` : 'نجهّز الفيديو…'}</span>
             {stage === 'video' && <span className="font-mono text-amber-300">{progress}%</span>}
           </div>
           <div className="h-2 rounded-full bg-slate-800 overflow-hidden">

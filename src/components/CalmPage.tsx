@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { waitForJob } from '../utils/waitForJob';
 import { AudioTagBar } from './AudioTagBar';
 import { Book, Check, ChevronLeft, ChevronRight, Download, Leaf, Loader2, Pause, Play, Share2, SlidersHorizontal, Sparkles, Star, Wand2 } from 'lucide-react';
 import { VOICES } from '../data/presets';
@@ -366,18 +367,17 @@ export const CalmPage: React.FC<Props> = ({ user, prices, onLoginRequired, onBal
       const job = await res.json().catch(() => ({}));
       if (typeof job.balance === 'number') onBalance(job.balance);
       if (!res.ok || !job.jobId) throw Object.assign(new Error(job.error || 'تعذّر تجهيز الريل'), { credits: job.code === 'INSUFFICIENT_CREDITS' });
-      while (!cancelled.current) {
-        await new Promise(r => setTimeout(r, 1500));
-        const s = await fetch(`/api/video/jobs/${job.jobId}`).then(r => r.json()).catch(() => ({}));
-        if (s.status === 'error' || s.success === false) throw new Error(s.error || 'تعذّر تجهيز الريل');
-        if (typeof s.eta === 'number') lastEta.current = { eta: s.eta, at: Date.now() };
-        if (s.status === 'queued' || s.status === 'rendering') setRenderJob({ status: s.status, progress: s.progress || 0, ahead: s.ahead || 0 });
-        if (s.status === 'done') {
-          setPercent(100);
-          setResult({ url: `/api/video/jobs/${job.jobId}/file` });
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-          break;
-        }
+      const ready = await waitForJob(job.jobId, {
+        isCancelled: () => cancelled.current,
+        onUpdate: s => {
+          if (typeof s.eta === 'number') lastEta.current = { eta: s.eta, at: Date.now() };
+          if (s.status === 'queued' || s.status === 'rendering') setRenderJob({ status: s.status, progress: s.progress || 0, ahead: s.ahead || 0 });
+        },
+      });
+      if (ready) {
+        setPercent(100);
+        setResult({ url: `/api/video/jobs/${job.jobId}/file` });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (e: any) {
       setError({ text: e instanceof TypeError ? 'تعذّر الاتصال حالياً، يرجى المحاولة لاحقاً.' : e.message, credits: e?.credits });

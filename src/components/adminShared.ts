@@ -9,7 +9,8 @@ export const date = (s: string | null) =>
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) throw new Error(data.error || 'تعذّر إتمام الطلب');
+  // Without a reason from our server (a gateway timeout, a page instead of JSON…) the status code at least tells what happened
+  if (!res.ok || !data.success) throw new Error(data.error || `تعذّر إتمام الطلب (HTTP ${res.status})`);
   return data as T;
 }
 
