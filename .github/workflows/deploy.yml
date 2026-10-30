@@ -1,0 +1,39 @@
+# Deploys to the VPS on every push to the working branch (or by hand from the Actions tab): copies the tracked files
+# over /var/www/sawt (never .env or data/, which are not in git) and rebuilds the container there.
+# Needs the repository secret DEPLOY_SSH_KEY: a private key whose public half is in the server's root authorized_keys.
+name: Deploy
+
+on:
+  push:
+    branches: [reel-lambda-retry-and-parallel-recitation]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOST: ${{ vars.DEPLOY_HOST || '158.220.97.14' }}
+      APP_DIR: /var/www/sawt
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH key
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "::error::Add the DEPLOY_SSH_KEY secret (Settings → Secrets and variables → Actions)"; exit 1; fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy files
+        run: git archive --format=tar HEAD | ssh -i ~/.ssh/id_deploy root@"$HOST" "tar -x -C $APP_DIR"
+
+      - name: Build and restart
+        run: ssh -i ~/.ssh/id_deploy root@"$HOST" "cd $APP_DIR && docker compose build && docker compose up -d && docker image prune -f >/dev/null"
