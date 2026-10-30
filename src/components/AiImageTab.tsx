@@ -6,7 +6,8 @@ interface ImageModel {
   id: string;
   name: string;
   editsImages: boolean;
-  answersText: boolean;
+  aspectRatios: string[];
+  resolutions: string[];
   inputPerM: number | null;
   outputPerM: number | null;
   imageInputUsd: number | null;
@@ -19,6 +20,7 @@ interface Job {
   modelName: string;
   prompt: string;
   aspectRatio: string;
+  resolution?: string;
   edit: boolean;
   createdAt: string;
   status: 'working' | 'completed' | 'failed';
@@ -44,13 +46,13 @@ const priceOf = (m: ImageModel) =>
 /** AI pictures from OpenRouter (admin only): pick a model with its price, describe the picture, keep what is made. */
 export const AiImageTab: React.FC = () => {
   const [models, setModels] = useState<ImageModel[] | null>(null);
-  const [ratios, setRatios] = useState<string[]>(['1:1']);
   const [library, setLibrary] = useState<Job[]>([]);
   const [spent, setSpent] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const [modelId, setModelId] = useState('');
-  const [aspect, setAspect] = useState('1:1');
+  const [aspect, setAspect] = useState('');
+  const [resolution, setResolution] = useState('');
   const [prompt, setPrompt] = useState('');
   const [image, setImage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,17 +64,22 @@ export const AiImageTab: React.FC = () => {
     api<{ jobs: Job[]; spentUsd: number }>('/api/admin/ai-image/library').then(d => { setLibrary(d.jobs); setSpent(d.spentUsd); }).catch(() => {});
   }, []);
   const loadModels = useCallback(() => {
-    api<{ models: ImageModel[]; aspectRatios: string[] }>('/api/admin/ai-image/models')
+    api<{ models: ImageModel[] }>('/api/admin/ai-image/models')
       .then(d => {
         setModels(d.models);
-        setRatios(d.aspectRatios);
         setModelId(prev => prev || d.models[0]?.id || '');
       })
       .catch(e => setError(e.message));
   }, []);
 
   useEffect(() => { loadModels(); loadLibrary(); }, [loadModels, loadLibrary]);
-  useEffect(() => { if (model && !model.editsImages) setImage(null); }, [model]);
+  // A new model: square when it can, its lowest resolution (the cheapest)
+  useEffect(() => {
+    if (!model) return;
+    if (!model.editsImages) setImage(null);
+    setAspect(prev => (model.aspectRatios.includes(prev) ? prev : model.aspectRatios.includes('1:1') ? '1:1' : model.aspectRatios[0] ?? ''));
+    setResolution(prev => (model.resolutions.includes(prev) ? prev : model.resolutions[0] ?? ''));
+  }, [model]);
 
   // Follow the picture being made until it is finished
   useEffect(() => {
@@ -101,7 +108,7 @@ export const AiImageTab: React.FC = () => {
     try {
       const d = await api<{ job: Job }>('/api/admin/ai-image/generate', {
         method: 'POST',
-        body: JSON.stringify({ model: model.id, prompt, aspectRatio: aspect, imageDataUrl: image ?? undefined }),
+        body: JSON.stringify({ model: model.id, prompt, aspectRatio: aspect, resolution, imageDataUrl: image ?? undefined }),
       });
       setActive(d.job);
       loadLibrary();
@@ -137,19 +144,29 @@ export const AiImageTab: React.FC = () => {
 
       {model && (
         <div className={`${card} space-y-3`}>
-          <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+          <div className="grid sm:grid-cols-[1fr_auto_auto] gap-2">
             <label className="block">
               <span className={label}>النموذج (السعر جنبه)</span>
               <select value={modelId} onChange={e => setModelId(e.target.value)} className={field}>
                 {models!.map(m => <option key={m.id} value={m.id}>{m.name} — {priceOf(m)}{m.editsImages ? ' · يعدّل صور' : ''}</option>)}
               </select>
             </label>
-            <label className="block">
-              <span className={label}>الأبعاد</span>
-              <select value={aspect} onChange={e => setAspect(e.target.value)} className={field}>
-                {ratios.map(a => <option key={a} value={a}>{a === '9:16' ? '9:16 (ستوري)' : a}</option>)}
-              </select>
-            </label>
+            {model.aspectRatios.length > 0 && (
+              <label className="block">
+                <span className={label}>الأبعاد</span>
+                <select value={aspect} onChange={e => setAspect(e.target.value)} className={field}>
+                  {model.aspectRatios.map(a => <option key={a} value={a}>{a === '9:16' ? '9:16 (ستوري)' : a}</option>)}
+                </select>
+              </label>
+            )}
+            {model.resolutions.length > 0 && (
+              <label className="block">
+                <span className={label}>الدقة (الأعلى أغلى)</span>
+                <select value={resolution} onChange={e => setResolution(e.target.value)} className={field}>
+                  {model.resolutions.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </label>
+            )}
           </div>
 
           <label className="block">
@@ -190,7 +207,7 @@ export const AiImageTab: React.FC = () => {
           <div className="flex items-center gap-2 text-sm text-slate-200">
             {active.status === 'working' && <Loader2 className="w-4 h-4 animate-spin text-amber-300" />}
             <span>{active.status === 'working' ? 'تُولَّد الصورة الآن…' : active.status === 'completed' ? 'جاهزة' : 'فشل التوليد'}</span>
-            <span className="text-xs text-slate-500" dir="ltr">{active.modelName} · {active.aspectRatio}{active.costUsd ? ` · ${usd(active.costUsd)}` : ''}</span>
+            <span className="text-xs text-slate-500" dir="ltr">{active.modelName} · {active.aspectRatio}{active.resolution ? ` · ${active.resolution}` : ''}{active.costUsd ? ` · ${usd(active.costUsd)}` : ''}</span>
           </div>
           {active.error && <div className="text-xs text-rose-300">{active.error}</div>}
           {active.status === 'completed' && (
@@ -216,7 +233,7 @@ export const AiImageTab: React.FC = () => {
                 </button>
               )}
               <div className="text-[11px] text-slate-300 line-clamp-2">{j.prompt}</div>
-              <div className="text-[10px] text-slate-500" dir="ltr">{j.modelName} · {j.aspectRatio}{j.costUsd ? ` · ${usd(j.costUsd)}` : ''}{j.edit ? ' · edit' : ''}</div>
+              <div className="text-[10px] text-slate-500" dir="ltr">{j.modelName} · {j.aspectRatio}{j.resolution ? ` · ${j.resolution}` : ''}{j.costUsd ? ` · ${usd(j.costUsd)}` : ''}{j.edit ? ' · edit' : ''}</div>
               <div className="flex gap-3 text-[11px]">
                 {j.files > 0 && <a href={`${file(j, 0)}?download=1`} className="flex items-center gap-1 text-slate-300 hover:text-amber-300"><Download className="w-3 h-3" /> تحميل</a>}
                 <button type="button" onClick={() => remove(j.id)} className="flex items-center gap-1 text-slate-400 hover:text-rose-300"><Trash2 className="w-3 h-3" /> حذف</button>

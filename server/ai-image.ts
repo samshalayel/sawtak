@@ -1,6 +1,5 @@
 // AI pictures from OpenRouter's image models, for the admin dashboard only (mounted under /api/admin), next to the AI
-// video tab. A picture is asked for through the chat API with `modalities: ["image", "text"]`, optionally with a
-// picture to edit; the work runs in the background (some models take a minute) and the result is saved to
+// video tab. A picture is asked for through OpenRouter's images API (POST /images), optionally with a picture to edit; the work runs in the background (some models take a minute) and the result is saved to
 // DATA_DIR/ai-image so what was paid for is never lost. Models are priced per token, so the real cost of each picture
 // (OpenRouter's usage.cost) is kept and shown beside the model the next time.
 import express from 'express';
@@ -14,7 +13,6 @@ const key = () => process.env.OPENROUTER_API_KEY || '';
 const dir = () => path.join(path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data')), 'ai-image');
 const MAX_ACTIVE = 4;
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-export const ASPECT_RATIOS = ['1:1', '9:16', '16:9', '4:5', '3:4', '4:3'];
 
 export const aiImageRouter = express.Router();
 
@@ -24,7 +22,8 @@ export interface ImageModel {
   id: string;
   name: string;
   editsImages: boolean;      // takes a picture as input too (to edit or restyle it)
-  answersText: boolean;      // can also answer in text: image-only models refuse to be asked for both
+  aspectRatios: string[];    // as the model lists them (empty: it picks)
+  resolutions: string[];     // e.g. 1K, 2K, 4K (empty: it picks)
   /** USD per million tokens, as OpenRouter lists them. */
   inputPerM: number | null;
   outputPerM: number | null;
@@ -38,21 +37,32 @@ const perM = (v: unknown) => (v !== undefined && Number.isFinite(Number(v)) ? Nu
 
 let modelCache: { at: number; models: Omit<ImageModel, 'lastCostUsd'>[] } | null = null;
 
+const getJson = async (url: string) => {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${key()}` }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
+  return (await res.json())?.data ?? [];
+};
+
 async function imageModels(): Promise<Omit<ImageModel, 'lastCostUsd'>[]> {
   if (modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models;
-  const res = await fetch(`${base()}/models?output_modalities=image`, { headers: { Authorization: `Bearer ${key()}` }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
-  const list: any[] = (await res.json())?.data ?? [];
+  // The images API lists the models and their options; the prices are in the general model list
+  const [list, priced]: any[][] = await Promise.all([
+    getJson(`${base()}/images/models`),
+    getJson(`${base()}/models?output_modalities=image`).catch(() => []),
+  ]);
+  const pricing = new Map(priced.map(m => [String(m.id), m.pricing ?? {}]));
+  const values = (param: any): string[] => (Array.isArray(param?.values) ? param.values.map(String) : []);
   const models = list
-    // The auto router is not a model and has no fixed price
-    .filter(m => (m.architecture?.output_modalities ?? []).includes('image') && !String(m.id).startsWith('openrouter/'))
+    .filter(m => m?.id && !String(m.id).startsWith('openrouter/'))
     .map(m => {
-      const p = m.pricing ?? {};
+      const p: any = pricing.get(String(m.id)) ?? {};
       const image = Number(p.image);
+      const params = m.supported_parameters ?? {};
       return {
         id: String(m.id), name: String(m.name || m.id).replace(/^[^:]+:\s*/, ''),
-        editsImages: (m.architecture?.input_modalities ?? []).includes('image'),
-        answersText: (m.architecture?.output_modalities ?? []).includes('text'),
+        editsImages: Number(params.input_references?.max) > 0,
+        aspectRatios: values(params.aspect_ratio).filter(a => a !== 'auto'),
+        resolutions: values(params.resolution),
         // Pictures out are priced in image_output (per image token); completion is only text
         inputPerM: perM(p.prompt), outputPerM: Number(p.image_output) > 0 ? perM(p.image_output) : perM(p.completion),
         imageInputUsd: Number.isFinite(image) && image > 0 ? image : null,
@@ -80,7 +90,7 @@ aiImageRouter.get('/models', async (_req, res) => {
   if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
   try {
     const costs = await lastCosts();
-    res.json({ success: true, aspectRatios: ASPECT_RATIOS, models: (await imageModels()).map(m => ({ ...m, lastCostUsd: costs.get(m.id) ?? null })) });
+    res.json({ success: true, models: (await imageModels()).map(m => ({ ...m, lastCostUsd: costs.get(m.id) ?? null })) });
   } catch (error: any) {
     console.error('Image models failed:', error?.message || error);
     res.status(502).json({ success: false, error: 'تعذّر جلب قائمة النماذج من OpenRouter' });
@@ -95,6 +105,7 @@ export interface ImageJob {
   modelName: string;
   prompt: string;
   aspectRatio: string;
+  resolution?: string;
   edit: boolean;            // a picture was given to edit
   createdAt: string;
   status: 'working' | 'completed' | 'failed';
@@ -126,49 +137,48 @@ async function allJobs(): Promise<ImageJob[]> {
 // Jobs being worked on in this process: one left "working" after a restart is shown as failed
 const running = new Set<string>();
 
+/** The file type of picture bytes, from their first bytes. */
+const kindOf = (b: Buffer) =>
+  b[0] === 0x89 && b[1] === 0x50 ? 'png' : b[0] === 0xff && b[1] === 0xd8 ? 'jpg' : b.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
+
 /** Asks OpenRouter for the picture and saves what comes back. */
-async function run(job: ImageJob, editDataUrl: string | null, answersText: boolean) {
+async function run(job: ImageJob, editDataUrl: string | null) {
   try {
-    const content = editDataUrl
-      ? [{ type: 'text', text: job.prompt }, { type: 'image_url', image_url: { url: editDataUrl } }]
-      : job.prompt;
-    const res = await fetch(`${base()}/chat/completions`, {
+    const res = await fetch(`${base()}/images`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: job.model,
-        messages: [{ role: 'user', content }],
-        modalities: answersText ? ['image', 'text'] : ['image'],
-        image_config: { aspect_ratio: job.aspectRatio },
-        usage: { include: true },
+        model: job.model, prompt: job.prompt, n: 1,
+        ...(job.aspectRatio ? { aspect_ratio: job.aspectRatio } : {}),
+        ...(job.resolution ? { resolution: job.resolution } : {}),
+        ...(editDataUrl ? { input_references: [{ type: 'image_url', image_url: { url: editDataUrl } }] } : {}),
       }),
       signal: AbortSignal.timeout(300_000),
     });
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(String(data?.error?.message || data?.error || `HTTP ${res.status}`).slice(0, 300));
-    const message = data?.choices?.[0]?.message ?? {};
-    const urls: string[] = (message.images ?? []).map((i: any) => i?.image_url?.url).filter((u: unknown) => typeof u === 'string');
     const cost = Number(data?.usage?.cost);
     if (Number.isFinite(cost) && cost > 0) job.costUsd = cost;
-    job.note = typeof message.content === 'string' && message.content.trim() ? message.content.trim().slice(0, 500) : undefined;
-    if (urls.length === 0) throw new Error(job.note ? `لم يرجع النموذج صورة: ${job.note}` : 'لم يرجع النموذج صورة');
+    const items: any[] = Array.isArray(data?.data) ? data.data : [];
+    job.note = items.map(i => i?.revised_prompt).find(t => typeof t === 'string' && t.trim())?.trim().slice(0, 500);
+    if (items.length === 0) throw new Error('لم يرجع النموذج صورة');
 
     let saved = 0;
-    for (const url of urls.slice(0, 4)) {
+    for (const item of items.slice(0, 4)) {
       let bytes: Buffer;
-      let ext = 'png';
-      const inline = url.match(/^data:image\/(\w+);base64,(.*)$/s);
-      if (inline) {
-        ext = inline[1] === 'jpeg' ? 'jpg' : inline[1];
-        bytes = Buffer.from(inline[2], 'base64');
-      } else {
-        // A link instead of the bytes: fetched without the key
-        const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-        if (!r.ok) continue;
-        bytes = Buffer.from(await r.arrayBuffer());
-        ext = /jpe?g/.test(r.headers.get('content-type') || '') ? 'jpg' : /webp/.test(r.headers.get('content-type') || '') ? 'webp' : 'png';
-      }
-      if (!/^(png|jpg|webp)$/.test(ext) || bytes.length < 100) continue;
+      if (typeof item?.b64_json === 'string') bytes = Buffer.from(item.b64_json.replace(/^data:[^,]*,/, ''), 'base64');
+      else if (typeof item?.url === 'string') {
+        const inline = item.url.match(/^data:[^,]*;base64,(.*)$/s);
+        if (inline) bytes = Buffer.from(inline[1], 'base64');
+        else {
+          // A link instead of the bytes: fetched without the key
+          const r = await fetch(item.url, { signal: AbortSignal.timeout(60_000) });
+          if (!r.ok) continue;
+          bytes = Buffer.from(await r.arrayBuffer());
+        }
+      } else continue;
+      const ext = kindOf(bytes);
+      if (!ext) continue;
       job.ext = ext;
       await fs.writeFile(imageFile(job.id, saved, ext), bytes);
       saved++;
@@ -194,7 +204,8 @@ aiImageRouter.post('/generate', async (req, res) => {
     if (!model) return res.status(400).json({ success: false, error: 'النموذج غير موجود في القائمة' });
     const prompt = String(b.prompt || '').trim().slice(0, 4000);
     if (prompt.length < 3) return res.status(400).json({ success: false, error: 'اكتب وصف الصورة' });
-    const aspectRatio = ASPECT_RATIOS.includes(b.aspectRatio) ? b.aspectRatio : '1:1';
+    const aspectRatio = model.aspectRatios.includes(b.aspectRatio) ? b.aspectRatio : '';
+    const resolution = model.resolutions.includes(b.resolution) ? b.resolution : undefined;
     const edit = typeof b.imageDataUrl === 'string' && b.imageDataUrl.startsWith('data:image/') ? b.imageDataUrl : null;
     if (edit && (!model.editsImages || edit.length > MAX_IMAGE_BYTES * 1.4)) {
       return res.status(400).json({ success: false, error: model.editsImages ? 'الصورة أكبر من 4 ميغابايت' : 'هذا النموذج لا يأخذ صورة' });
@@ -206,12 +217,12 @@ aiImageRouter.post('/generate', async (req, res) => {
     if (running.size >= MAX_ACTIVE) return res.status(429).json({ success: false, error: 'هناك عدة صور قيد التوليد الآن، انتظر حتى تنتهي' });
 
     const job: ImageJob = {
-      id: crypto.randomBytes(8).toString('hex'), model: model.id, modelName: model.name, prompt, aspectRatio, edit: Boolean(edit),
+      id: crypto.randomBytes(8).toString('hex'), model: model.id, modelName: model.name, prompt, aspectRatio, resolution, edit: Boolean(edit),
       createdAt: new Date().toISOString(), status: 'working', files: 0,
     };
     await writeJob(job);
     running.add(job.id);
-    run(job, edit, model.answersText);
+    run(job, edit);
     res.json({ success: true, job });
   } catch (error: any) {
     console.error('Image request failed:', error?.message || error);
