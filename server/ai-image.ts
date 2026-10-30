@@ -24,6 +24,7 @@ export interface ImageModel {
   id: string;
   name: string;
   editsImages: boolean;      // takes a picture as input too (to edit or restyle it)
+  answersText: boolean;      // can also answer in text: image-only models refuse to be asked for both
   /** USD per million tokens, as OpenRouter lists them. */
   inputPerM: number | null;
   outputPerM: number | null;
@@ -43,13 +44,15 @@ async function imageModels(): Promise<Omit<ImageModel, 'lastCostUsd'>[]> {
   if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
   const list: any[] = (await res.json())?.data ?? [];
   const models = list
-    .filter(m => (m.architecture?.output_modalities ?? []).includes('image'))
+    // The auto router is not a model and has no fixed price
+    .filter(m => (m.architecture?.output_modalities ?? []).includes('image') && !String(m.id).startsWith('openrouter/'))
     .map(m => {
       const p = m.pricing ?? {};
       const image = Number(p.image);
       return {
         id: String(m.id), name: String(m.name || m.id).replace(/^[^:]+:\s*/, ''),
         editsImages: (m.architecture?.input_modalities ?? []).includes('image'),
+        answersText: (m.architecture?.output_modalities ?? []).includes('text'),
         inputPerM: perM(p.prompt), outputPerM: perM(p.completion),
         imageInputUsd: Number.isFinite(image) && image > 0 ? image : null,
       };
@@ -123,7 +126,7 @@ async function allJobs(): Promise<ImageJob[]> {
 const running = new Set<string>();
 
 /** Asks OpenRouter for the picture and saves what comes back. */
-async function run(job: ImageJob, editDataUrl: string | null) {
+async function run(job: ImageJob, editDataUrl: string | null, answersText: boolean) {
   try {
     const content = editDataUrl
       ? [{ type: 'text', text: job.prompt }, { type: 'image_url', image_url: { url: editDataUrl } }]
@@ -134,7 +137,7 @@ async function run(job: ImageJob, editDataUrl: string | null) {
       body: JSON.stringify({
         model: job.model,
         messages: [{ role: 'user', content }],
-        modalities: ['image', 'text'],
+        modalities: answersText ? ['image', 'text'] : ['image'],
         image_config: { aspect_ratio: job.aspectRatio },
         usage: { include: true },
       }),
@@ -207,7 +210,7 @@ aiImageRouter.post('/generate', async (req, res) => {
     };
     await writeJob(job);
     running.add(job.id);
-    run(job, edit);
+    run(job, edit, model.answersText);
     res.json({ success: true, job });
   } catch (error: any) {
     console.error('Image request failed:', error?.message || error);

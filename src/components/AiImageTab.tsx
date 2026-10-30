@@ -6,6 +6,7 @@ interface ImageModel {
   id: string;
   name: string;
   editsImages: boolean;
+  answersText: boolean;
   inputPerM: number | null;
   outputPerM: number | null;
   imageInputUsd: number | null;
