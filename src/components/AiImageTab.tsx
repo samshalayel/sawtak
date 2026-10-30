@@ -39,7 +39,7 @@ const perM = (n: number | null) => (n === null ? '?' : `$${+n.toFixed(2)}`);
 
 /** What a model costs: the real average per picture once one was made, otherwise its token prices. */
 const priceOf = (m: ImageModel) =>
-  m.lastCostUsd !== null ? `≈ ${usd(m.lastCostUsd)} للصورة` : `دخل ${perM(m.inputPerM)} · خرج ${perM(m.outputPerM)} لكل مليون توكن`;
+  m.lastCostUsd !== null ? `≈ ${usd(m.lastCostUsd)} للصورة` : `الصورة ${perM(m.outputPerM)} لكل مليون توكن`;
 
 /** AI pictures from OpenRouter (admin only): pick a model with its price, describe the picture, keep what is made. */
 export const AiImageTab: React.FC = () => {

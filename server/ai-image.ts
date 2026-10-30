@@ -53,7 +53,8 @@ async function imageModels(): Promise<Omit<ImageModel, 'lastCostUsd'>[]> {
         id: String(m.id), name: String(m.name || m.id).replace(/^[^:]+:\s*/, ''),
         editsImages: (m.architecture?.input_modalities ?? []).includes('image'),
         answersText: (m.architecture?.output_modalities ?? []).includes('text'),
-        inputPerM: perM(p.prompt), outputPerM: perM(p.completion),
+        // Pictures out are priced in image_output (per image token); completion is only text
+        inputPerM: perM(p.prompt), outputPerM: Number(p.image_output) > 0 ? perM(p.image_output) : perM(p.completion),
         imageInputUsd: Number.isFinite(image) && image > 0 ? image : null,
       };
     })
