@@ -35,4 +35,6 @@ lab.close();
 # The voice fingerprints' reference clips (small) so cloned voices work in the lab too
 if [ -d "$PROD/data/custom-voices" ]; then cp -a "$PROD/data/custom-voices" "$LAB/data/"; fi
 mv "$PROD/data/lab-snapshot.db" "$LAB/data/sawtik.db"
+# The app runs as "node" in the container: the lab's data must belong to the same user as the site's
+chown -R --reference="$PROD/data" "$LAB/data"
 echo "Lab set up in $LAB"
