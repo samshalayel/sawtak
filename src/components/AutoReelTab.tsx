@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Play, RotateCcw, Trash2, Wand2 } from 'lucide-react';
 import { api, card, usd } from './adminShared';
 
@@ -79,6 +79,8 @@ export const AutoReelTab: React.FC = () => {
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [open, setOpen] = useState<{ reel: Reel; files: string[] } | null>(null);
+  const [autoPlay, setAutoPlay] = useState(false);
+  const openCard = useRef<HTMLDivElement>(null);
 
   const video = useMemo(() => options?.videoModels.find(m => m.id === videoModel) ?? null, [options, videoModel]);
 
@@ -116,6 +118,10 @@ export const AutoReelTab: React.FC = () => {
     setOpen(null);
     loadOpen();
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // An opened reel comes into view (it sits above the list)
+  useEffect(() => {
+    if (open?.reel.id === openId) openCard.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [open?.reel.id, openId]);
   useEffect(() => {
     if (!open || !working(open.reel)) return;
     const timer = setInterval(loadOpen, 5000);
@@ -260,7 +266,7 @@ export const AutoReelTab: React.FC = () => {
       )}
 
       {open && (
-        <div className={`${card} space-y-4`}>
+        <div ref={openCard} className={`${card} space-y-4 scroll-mt-4`}>
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="text-white font-bold">{open.reel.title || open.reel.idea.slice(0, 80)}</div>
@@ -294,7 +300,7 @@ export const AutoReelTab: React.FC = () => {
 
           {open.files.includes('final.mp4') && (
             <div className="space-y-2">
-              <video src={file(open.reel.id, 'final.mp4')} controls playsInline className="max-h-[70vh] rounded-xl bg-black" />
+              <video src={file(open.reel.id, 'final.mp4')} controls playsInline autoPlay={autoPlay} className="max-h-[70vh] rounded-xl bg-black" />
               <a href={`${file(open.reel.id, 'final.mp4')}?download=1`} className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-amber-300">
                 <Download className="w-3.5 h-3.5" /> تحميل الريل ({open.reel.duration} ث)
               </a>
@@ -341,14 +347,18 @@ export const AutoReelTab: React.FC = () => {
         {reels.length === 0 && <div className="text-xs text-slate-400">ما في ريلز بعد.</div>}
         {reels.map(r => (
           <div key={r.id} className="flex items-center gap-3 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">
-            <button type="button" onClick={() => setOpenId(r.id)} className="flex-1 text-right min-w-0">
+            <button type="button" onClick={() => { setAutoPlay(false); setOpenId(r.id); }} className="flex-1 text-right min-w-0">
               <div className="text-sm text-slate-100 truncate">{r.title || r.idea}</div>
               <div className="text-[11px] text-slate-500">
                 {r.stage === 'done' ? 'جاهز' : r.stage === 'failed' ? 'متوقف' : `قيد العمل: ${STAGES.find(s => s.id === r.stage)?.label}`}
                 {' · '}<span dir="ltr">{r.videoModelName} · {usd(r.spentUsd)}</span>
               </div>
             </button>
-            {r.stage === 'done' && <Play className="w-4 h-4 text-emerald-400" />}
+            {r.stage === 'done' && (
+              <button type="button" onClick={() => { setAutoPlay(true); setOpenId(r.id); }} className="text-emerald-400 hover:text-emerald-300" title="تشغيل">
+                <Play className="w-4 h-4" />
+              </button>
+            )}
             <button type="button" onClick={() => remove(r.id)} className="text-slate-500 hover:text-rose-300" title="حذف"><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
