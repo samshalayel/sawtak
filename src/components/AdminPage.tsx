@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   BarChart3, Users, ListOrdered, Settings, Loader2, Search, Plus, Minus, Ban, CheckCircle2,
-  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, Film, FlaskConical, Smartphone, BookOpen, ImageIcon, Wand2
+  ShieldCheck, ShieldOff, RefreshCw, Trash2, ChevronDown, ChevronUp, Save, ExternalLink, MailCheck, KeyRound, ShieldAlert, AudioLines, Clapperboard, Film, FlaskConical, Smartphone, BookOpen, ImageIcon, Wand2, LayoutGrid
 } from 'lucide-react';
 import { AuthUser, formatCredits, POINTS_TO_SECONDS } from '../types/auth';
 import { api, card, date, num, td, th, usd } from './adminShared';
@@ -12,6 +12,7 @@ import { MotionTab } from './MotionTab';
 import { AiVideoTab } from './AiVideoTab';
 import { AiImageTab } from './AiImageTab';
 import { AutoReelTab } from './AutoReelTab';
+import { GalleryAdminTab } from './GalleryAdminTab';
 import { SmtpCard } from './SmtpCard';
 import { BenchmarkTab } from './BenchmarkTab';
 import { JawwalTab } from './JawwalTab';
@@ -20,7 +21,7 @@ import { usePaged } from './Pager';
 import { QuranReelsTab } from './QuranReelsTab';
 import { ResetStatsCard } from './ResetStatsCard';
 
-type Tab = 'overview' | 'quran' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'aivideo' | 'aiimage' | 'autoreel' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
+type Tab = 'overview' | 'quran' | 'users' | 'usage' | 'keys' | 'voices' | 'motion' | 'aivideo' | 'aiimage' | 'autoreel' | 'gallery' | 'moderation' | 'settings' | 'benchmark' | 'jawwal';
 
 interface UsageSummary {
   feature: 'tts' | 'dialogue' | 'tashkeel' | 'optimize' | 'script';
@@ -169,6 +170,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
     { id: 'aivideo', label: 'فيديو ذكاء اصطناعي', icon: Film },
     { id: 'aiimage', label: 'صور ذكاء اصطناعي', icon: ImageIcon },
     { id: 'autoreel', label: 'ريلز تلقائي', icon: Wand2 },
+    { id: 'gallery', label: 'المعرض', icon: LayoutGrid },
     { id: 'moderation', label: 'الرقابة على المحتوى', icon: ShieldAlert },
     { id: 'settings', label: 'الإعدادات والتسعير', icon: Settings },
     { id: 'benchmark', label: 'اختبار الأداء', icon: FlaskConical },
@@ -208,6 +210,7 @@ export const AdminPage: React.FC<{ currentUser: AuthUser; onCurrentUserCreditsCh
       {tab === 'aivideo' && <AiVideoTab />}
       {tab === 'aiimage' && <AiImageTab />}
       {tab === 'autoreel' && <AutoReelTab />}
+      {tab === 'gallery' && <GalleryAdminTab />}
       {tab === 'moderation' && <ModerationTab />}
       {tab === 'benchmark' && <BenchmarkTab />}
       {tab === 'jawwal' && <JawwalTab />}

@@ -18,7 +18,8 @@ import { QuranShowcase } from './components/QuranShowcase';
 import { BetaRibbon } from './components/BetaRibbon';
 import { MotionTab } from './components/MotionTab';
 import { MobileAppNav } from './components/MobileAppNav';
-import { PartyPopper, Newspaper, Leaf, Stethoscope, BookOpen } from 'lucide-react';
+import { PartyPopper, Newspaper, Leaf, Stethoscope, BookOpen, LayoutGrid } from 'lucide-react';
+import { GalleryPage } from './components/GalleryPage';
 import { LandingPage } from './components/LandingPage';
 import { DialogueVoicePicker, DialogueSpeaker } from './components/DialogueVoicePicker';
 import { DialogueEditor } from './components/DialogueEditor';
@@ -53,7 +54,7 @@ import {
 } from 'lucide-react';
 
 // "home" = landing page for visitors (logged-in users land in the studio)
-type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'quran' | 'motion' | 'medical';
+type View = 'home' | 'studio' | 'admin' | 'terms' | 'greetings' | 'press' | 'calm' | 'quran' | 'motion' | 'medical' | 'gallery';
 const readView = (): View => {
   const hash = window.location.hash;
   if (hash === '#/admin') return 'admin';
@@ -64,6 +65,7 @@ const readView = (): View => {
   if (hash === '#/quran') return 'quran';
   if (hash === '#/motion') return 'motion';
   if (hash === '#/medical') return 'medical';
+  if (hash === '#/gallery' || hash.startsWith('#/gallery/')) return 'gallery';
   if (hash === '#/studio') return 'studio';
   const appLike = window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(max-width: 639px)').matches;
   return appLike ? 'studio' : 'home';
@@ -796,6 +798,10 @@ export default function App() {
           onOpenPackages={() => setShowPackages(true)}
         />
       </main>
+      ) : view === 'gallery' ? (
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6">
+        <GalleryPage user={user} onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })} />
+      </main>
       ) : view === 'terms' ? (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">
         <TermsPage />
@@ -825,6 +831,8 @@ export default function App() {
             title="آيات بصوت القارئ" text="اختر آيات كاملة بتلاوة قارئ حقيقي، فوق مشاهد طبيعة هادئة، جاهزة للمشاركة" />}
           {serviceOn('medical') && <HomeEntry href="#/medical" icon={Stethoscope} color="#0284c7" cta="ابدأ"
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
+          <HomeEntry href="#/gallery" icon={LayoutGrid} color="#d97706" cta="تصفّح"
+            title="معرض الأعمال" text="استمع وشاهد ما صنعه غيرك على صوتك الذكي، وشارك أعمالك أنت أيضاً" />
         </div>
 
         {studioOn && (<>

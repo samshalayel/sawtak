@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AudioLines, Download, Loader2, Mic, Square, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { api, card, date } from './adminShared';
 import { base64ToBlobUrl } from '../utils/audio';
+import { AddToGalleryButton } from './GalleryShare';
 
 // Admin-only trial of voice replication: a voice avatar from reference clips, either at Google (Gemini, with a consent
 // recording) or through OpenRouter's cloning models (the clip goes with every request, so a model can be swapped).
@@ -457,6 +458,7 @@ const VoiceCard: React.FC<{ voice: CustomVoice; models: VoicesData['openRouter']
             >
               <Download className="w-3.5 h-3.5" /> تحميل ({result.seconds.toFixed(1)} ث{result.model ? ` · ${models.find(m => m.id === result.model)?.label ?? result.model}` : ''})
             </a>
+            <AddToGalleryButton key={result.url} kind="fingerprint" defaultTitle={voice.name} blob={() => fetch(result.url).then(r => r.blob())} />
           </>
         )}
       </div>

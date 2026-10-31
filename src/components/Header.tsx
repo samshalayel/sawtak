@@ -12,7 +12,7 @@ import {
   ArrowRight,
   Package,
   Sun,
-  Moon, Clapperboard, Eye, EyeOff } from 'lucide-react';
+  Moon, Clapperboard, Eye, EyeOff, LayoutGrid } from 'lucide-react';
 import { AuthUser, formatCredits } from '../types/auth';
 import { isOfferActive } from '../data/packages';
 import { getTheme, setTheme, Theme } from '../utils/theme';
@@ -93,6 +93,16 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </button>
+
+            {/* The public gallery, for visitors too */}
+            <a
+              href="#/gallery"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+              title="معرض الأعمال"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">المعرض</span>
+            </a>
 
             {user ? (
               <>

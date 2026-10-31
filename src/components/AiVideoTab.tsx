@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Film, Loader2, Trash2 } from 'lucide-react';
 import { api, card, usd } from './adminShared';
+import { AddToGalleryButton } from './GalleryShare';
 
 interface VideoModel {
   id: string;
@@ -272,6 +273,7 @@ export const AiVideoTab: React.FC = () => {
               <div className="text-[10px] text-slate-500" dir="ltr">{j.modelName} · {j.resolution} · {j.duration}s · {usd(j.costUsd ?? j.estimateUsd)}</div>
               <div className="flex gap-3 text-[11px]">
                 {j.file && <a href={`/api/admin/ai-video/jobs/${j.id}/file?download=1`} className="flex items-center gap-1 text-slate-300 hover:text-amber-300"><Download className="w-3 h-3" /> تحميل</a>}
+                {j.file && <AddToGalleryButton kind="video" source="ai-video" itemRef={j.id} defaultTitle={j.prompt} compact />}
                 <button type="button" onClick={() => remove(j.id)} className="flex items-center gap-1 text-slate-400 hover:text-rose-300"><Trash2 className="w-3 h-3" /> حذف</button>
               </div>
             </div>

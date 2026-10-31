@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Play, RotateCcw, Trash2, Wand2 } from 'lucide-react';
 import { api, card, usd } from './adminShared';
+import { AddToGalleryButton } from './GalleryShare';
 
 interface VideoOption { id: string; name: string; durations: number[]; firstFrame: boolean; resolutions: string[]; prices: Record<string, number | null> }
 interface Options {
@@ -287,6 +288,7 @@ const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['
                 )}
                 <div className="text-[11px] text-slate-200">{t.modelName}{t.costUsd ? ` · ${usd(t.costUsd)}` : ''}</div>
                 <div className="text-[10px] text-slate-500 line-clamp-2" dir="ltr">{t.editPrompt ? `[${t.editPrompt}] ` : ''}{t.prompt}</div>
+                {t.status === 'completed' && <AddToGalleryButton kind="video" source="avatar-test" itemRef={t.id} defaultTitle={t.text} compact />}
                 <button type="button" onClick={() => remove(t.id)} className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-rose-300"><Trash2 className="w-3 h-3" /> حذف</button>
               </div>
             ))}
@@ -560,6 +562,7 @@ export const AutoReelTab: React.FC = () => {
               <a href={`${file(open.reel.id, 'final.mp4')}?download=1`} className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-amber-300">
                 <Download className="w-3.5 h-3.5" /> تحميل الريل ({open.reel.duration} ث)
               </a>
+              <div><AddToGalleryButton kind="reel" source="auto-reel" itemRef={open.reel.id} defaultTitle={open.reel.title || open.reel.idea} /></div>
             </div>
           )}
 
