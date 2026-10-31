@@ -22,7 +22,7 @@ export interface ServicePrices {
 }
 export const DEFAULT_PRICES: ServicePrices = { voicePerMinute: 10, greeting: 25, calmReel: 30, quranReel: 30, motionLibrary: 100, motionFree: 500, medicalCard: 15, medicalReel: 30 };
 
-export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'quran' | 'motion' | 'press' | 'payments' | 'medical';
+export type ServiceId = 'tts' | 'dialogue' | 'greetings' | 'calm' | 'quran' | 'motion' | 'press' | 'payments' | 'medical' | 'remix';
 
 export interface PublicConfig {
   /** Service switches from the admin settings (missing = on). Stopped services are hidden from customers. */

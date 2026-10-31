@@ -800,7 +800,12 @@ export default function App() {
       </main>
       ) : view === 'gallery' ? (
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6">
-        <GalleryPage user={user} onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })} />
+        <GalleryPage
+          user={user}
+          onLoginRequired={reason => setAuthPrompt({ mode: 'register', reason })}
+          onCredits={credits => setUser(prev => (prev ? { ...prev, credits } : prev))}
+          onOpenPackages={() => setShowPackages(true)}
+        />
       </main>
       ) : view === 'terms' ? (
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6">

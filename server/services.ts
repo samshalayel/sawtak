@@ -3,7 +3,7 @@
 import express from 'express';
 import { AppSettings, getSettings } from './db.ts';
 
-export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'quran', 'motion', 'press', 'payments', 'medical'] as const;
+export const SERVICES = ['tts', 'dialogue', 'greetings', 'calm', 'quran', 'motion', 'press', 'payments', 'medical', 'remix'] as const;
 export type ServiceId = (typeof SERVICES)[number];
 
 /** The setting behind each switch (1 = on, 0 = off). */
@@ -17,6 +17,7 @@ export const SERVICE_SETTING: Record<ServiceId, keyof AppSettings> = {
   press: 'servicePress',
   payments: 'servicePayments',
   medical: 'serviceMedical',
+  remix: 'serviceRemix',
 };
 
 export const SERVICE_OFF_MESSAGE = 'هذه الخدمة متوقفة مؤقتاً، يرجى المحاولة لاحقاً.';

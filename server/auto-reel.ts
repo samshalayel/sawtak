@@ -94,6 +94,7 @@ interface Reel {
   scenes: Scene[];
   duration?: number;        // of the finished video
   stored?: string[];        // files moved to the media storage once finished (server/storage.ts)
+  owner?: number;           // the customer who made it from the gallery (none: the admin)
 }
 
 const safeId = (id: unknown): string | null => (typeof id === 'string' && /^[a-f0-9]{16}$/.test(id) ? id : null);
@@ -450,39 +451,58 @@ autoReelRouter.get('/options', async (_req, res) => {
   }
 });
 
+export interface AutoReelInput {
+  idea: string; dialect?: string; voice?: string; videoModel: string; resolution: string; imageModel: string; seconds?: number; videoScenes?: number;
+}
+
+/** Starts a reel (from the admin tab, or a customer's "make one like it" in the gallery); refusals carry a status. */
+export async function startAutoReel(b: AutoReelInput, owner?: number): Promise<Reel> {
+  const refuse = (status: number, message: string) => Object.assign(new Error(message), { status });
+  if (!key()) throw refuse(503, 'مفتاح OpenRouter غير مضبوط على الخادم');
+  const idea = String(b.idea || '').trim().slice(0, 2000);
+  if (idea.length < 5) throw refuse(400, 'اكتب فكرة الريل');
+  const dialect = b.dialect && DIALECTS[b.dialect] ? b.dialect : 'msa';
+  const voice = knownVoice(b.voice) ? b.voice! : VOICES[0].id;
+  const video = (await videoModels()).find(m => m.id === b.videoModel);
+  if (!video || !video.aspectRatios.includes('9:16')) throw refuse(400, 'اختر نموذج فيديو يدعم 9:16');
+  const resolution = String(b.resolution || '');
+  const rate = video.prices[resolution]?.silent;
+  if (rate == null) throw refuse(400, 'الدقة غير مدعومة أو سعرها غير معروف');
+  const picture = (await imageModels()).find(m => m.id === b.imageModel);
+  if (!picture) throw refuse(400, 'اختر نموذج الصور');
+  const targetSeconds = Math.min(90, Math.max(20, Math.round(Number(b.seconds) || 60)));
+  const clip = baseClip(video.durations);
+  const sceneCount = Math.min(12, Math.max(2, Math.round(targetSeconds / clip)));
+  const wanted = Math.round(Number(b.videoScenes));
+  const videoScenes = Number.isFinite(wanted) && wanted >= 0 && wanted < sceneCount ? wanted : undefined;
+  const estimateUsd = Math.round(((videoScenes ?? sceneCount) * rate * clip + sceneCount * PICTURE_GUESS_USD + 0.01) * 100) / 100;
+  if (estimateUsd > maxUsd()) throw refuse(400, `التكلفة المقدّرة $${estimateUsd} تتجاوز حد الريل ($${maxUsd()})`);
+  if (running.size >= 3) throw refuse(429, 'هناك ريلز قيد العمل الآن، حاول بعد دقائق');
+
+  const reel: Reel = {
+    id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), idea, dialect, voice,
+    imageModel: picture.id, videoModel: video.id, videoModelName: video.name, resolution, targetSeconds, sceneCount, videoScenes, estimateUsd,
+    stage: 'planning', scenes: [], owner,
+  };
+  await writeReel(reel);
+  pipeline(reel);
+  return reel;
+}
+
+/** A reel's state for other modules: its stage (a reel left by a restart reads as failed) and error. */
+export async function reelState(id: string): Promise<{ stage: Stage; error?: string } | null> {
+  const reel = safeId(id) ? await readReel(id) : null;
+  if (!reel) return null;
+  const r = shown(reel);
+  return { stage: r.stage, error: r.error };
+}
+
 autoReelRouter.post('/', async (req, res) => {
   try {
-    if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
-    const b = req.body ?? {};
-    const idea = String(b.idea || '').trim().slice(0, 2000);
-    if (idea.length < 5) return res.status(400).json({ success: false, error: 'اكتب فكرة الريل' });
-    const dialect = DIALECTS[b.dialect] ? b.dialect : 'msa';
-    const voice = knownVoice(b.voice) ? b.voice : VOICES[0].id;
-    const video = (await videoModels()).find(m => m.id === b.videoModel);
-    if (!video || !video.aspectRatios.includes('9:16')) return res.status(400).json({ success: false, error: 'اختر نموذج فيديو يدعم 9:16' });
-    const resolution = String(b.resolution || '');
-    const rate = video.prices[resolution]?.silent;
-    if (rate == null) return res.status(400).json({ success: false, error: 'الدقة غير مدعومة أو سعرها غير معروف' });
-    const picture = (await imageModels()).find(m => m.id === b.imageModel);
-    if (!picture) return res.status(400).json({ success: false, error: 'اختر نموذج الصور' });
-    const targetSeconds = Math.min(90, Math.max(20, Math.round(Number(b.seconds) || 60)));
-    const clip = baseClip(video.durations);
-    const sceneCount = Math.min(12, Math.max(2, Math.round(targetSeconds / clip)));
-    const wanted = Math.round(Number(b.videoScenes));
-    const videoScenes = Number.isFinite(wanted) && wanted >= 0 && wanted < sceneCount ? wanted : undefined;
-    const estimateUsd = Math.round(((videoScenes ?? sceneCount) * rate * clip + sceneCount * PICTURE_GUESS_USD + 0.01) * 100) / 100;
-    if (estimateUsd > maxUsd()) return res.status(400).json({ success: false, error: `التكلفة المقدّرة $${estimateUsd} تتجاوز حد الريل ($${maxUsd()})` });
-    if (running.size >= 2) return res.status(429).json({ success: false, error: 'هناك ريلز قيد العمل الآن، انتظر حتى تنتهي' });
-
-    const reel: Reel = {
-      id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), idea, dialect, voice,
-      imageModel: picture.id, videoModel: video.id, videoModelName: video.name, resolution, targetSeconds, sceneCount, videoScenes, estimateUsd,
-      stage: 'planning', scenes: [],
-    };
-    await writeReel(reel);
-    pipeline(reel);
+    const reel = await startAutoReel(req.body ?? {});
     res.json({ success: true, reel });
   } catch (error: any) {
+    if (error?.status) return res.status(error.status).json({ success: false, error: error.message });
     console.error('Auto reel start failed:', error?.message || error);
     res.status(500).json({ success: false, error: 'تعذّر بدء الريل' });
   }

@@ -123,6 +123,9 @@ interface AppSettings {
   costQuranReel: number;
   costMedicalCard: number;
   costMedicalReel: number;
+  costRemixImage: number;
+  costRemixVideoSecond: number;
+  costRemixReelSecond: number;
   serviceTts: number;
   serviceDialogue: number;
   serviceGreetings: number;
@@ -132,6 +135,7 @@ interface AppSettings {
   servicePress: number;
   servicePayments: number;
   serviceMedical: number;
+  serviceRemix: number;
   betaRibbon: number;
   reelLambda: number;
 }
@@ -884,6 +888,9 @@ const SERVICE_COST_FIELDS: { key: keyof AppSettings; label: string; icon: string
   { key: 'costMedicalReel',    label: 'ريل طبي', icon: '🎞️', hint: 'نقطة للريل شامل الصوت (أو سعر الصوت إن كان أطول)' },
   { key: 'costMotionLibrary',  label: 'ريلز — نسق جاهز', icon: '🎬', hint: 'نقطة للفيديو الواحد' },
   { key: 'costMotionFree',     label: 'ريلز — نسق حر', icon: '✨', hint: 'نقطة للفيديو الواحد' },
+  { key: 'costRemixImage',       label: 'اصنع مثله — صورة', icon: '🖼️', hint: 'نقطة للصورة الواحدة (من المعرض)' },
+  { key: 'costRemixVideoSecond', label: 'اصنع مثله — فيديو ذكاء اصطناعي', icon: '🎥', hint: 'نقطة لكل ثانية من المقطع' },
+  { key: 'costRemixReelSecond',  label: 'اصنع مثله — ريلز تلقائي', icon: '🪄', hint: 'نقطة لكل ثانية من مدة الريل' },
 ];
 
 /** On/off switch per service (1 = on). Stopped services are hidden from customers and refused by the server; admins can still use them. */
@@ -897,6 +904,7 @@ const SERVICE_SWITCHES: { key: keyof AppSettings; label: string; icon: string }[
   { key: 'servicePress', label: 'استوديو الصحفيين', icon: '📰' },
   { key: 'servicePayments', label: 'الدفع بجوال باي', icon: '💳' },
   { key: 'serviceMedical', label: 'البطاقات والريلز الطبية', icon: '🩺' },
+  { key: 'serviceRemix', label: '«اصنع مثله» من المعرض', icon: '🪄' },
 ];
 
 const SETTING_FIELDS: { key: Exclude<keyof AppSettings, 'contactWhatsapp'>; label: string; hint: string; step?: string; points?: boolean }[] = [

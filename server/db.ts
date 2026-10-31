@@ -197,6 +197,10 @@ export interface AppSettings {
   costQuranReel: number;             // pts per Quran reel (reciter's recitation); until set, the calm reel price
   costMedicalCard: number;           // default 15 pts per medical card image
   costMedicalReel: number;           // default 30 pts per medical reel (voice included)
+  // "Make one like it" from the gallery (server/remix.ts)
+  costRemixImage: number;            // default 10 pts per AI picture
+  costRemixVideoSecond: number;      // default 10 pts per second of AI clip
+  costRemixReelSecond: number;       // default 5 pts per second of automatic reel
   // Service switches, 1 = on, 0 = off (see server/services.ts)
   serviceTts: number;
   serviceDialogue: number;
@@ -207,6 +211,7 @@ export interface AppSettings {
   servicePress: number;
   servicePayments: number;
   serviceMedical: number;
+  serviceRemix: number;              // "make one like it" in the gallery
   betaRibbon: number;                // 1 = "نسخة تجريبية" ribbon on every page
   reelLambda: number;                // calm/Quran reels on AWS Lambda: 0 = never, 1 = when this server is busy, 2 = always
   generationsPerMinute: number;      // per-user rate limit
@@ -237,6 +242,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   costQuranReel: 30,
   costMedicalCard: 15,
   costMedicalReel: 30,
+  costRemixImage: 10,
+  costRemixVideoSecond: 10,
+  costRemixReelSecond: 5,
   serviceTts: 1,
   serviceDialogue: 1,
   serviceGreetings: 1,
@@ -246,6 +254,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   servicePress: 1,
   servicePayments: 1,
   serviceMedical: 1,
+  serviceRemix: 1,
   betaRibbon: 1,
   reelLambda: 0,
   contactWhatsapp: '',

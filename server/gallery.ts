@@ -66,12 +66,28 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS gallery_items_status ON gallery_items(status, approved_at);
 `);
+// How the item was made (models, settings, instructions) when it came from an admin tool: "make one like it" runs it
+// again with the customer's own words (server/remix.ts)
+if (!(db.prepare('PRAGMA table_info(gallery_items)').all() as { name: string }[]).some(c => c.name === 'recipe')) {
+  db.exec('ALTER TABLE gallery_items ADD COLUMN recipe TEXT');
+}
 
 interface ItemRow {
   id: number; kind: Kind; title: string; description: string; category: Category; tags: string; ext: string; mime: string;
   has_poster: number; user_id: number | null; by_admin: number; status: 'pending' | 'approved' | 'rejected'; reject_reason: string | null;
-  featured: number; views: number; source: string; created_at: string; approved_at: string | null;
+  featured: number; views: number; source: string; created_at: string; approved_at: string | null; recipe: string | null;
 }
+
+export type Recipe =
+  | { type: 'image'; model: string; prompt: string; aspectRatio?: string; resolution?: string }
+  | { type: 'video'; model: string; prompt: string; resolution: string; aspectRatio: string; duration: number; sound: boolean }
+  | { type: 'reel'; idea: string; dialect: string; voice: string; imageModel: string; videoModel: string; resolution: string; seconds: number; videoScenes?: number };
+
+export const itemRecipe = (id: number): { row: ItemRow; recipe: Recipe } | null => {
+  const row = getItem(id);
+  if (!row?.recipe || row.status !== 'approved') return null;
+  try { return { row, recipe: JSON.parse(row.recipe) }; } catch { return null; }
+};
 
 const fileKey = (row: Pick<ItemRow, 'id' | 'ext'>) => `gallery/${row.id}.${row.ext}`;
 const posterKey = (id: number) => `gallery/${id}-poster.jpg`;
@@ -82,7 +98,7 @@ function publicItem(row: ItemRow & { author_name?: string | null }) {
   return {
     id: row.id, kind: row.kind, title: row.title, description: row.description, category: row.category,
     tags: row.tags ? row.tags.split(',').filter(Boolean) : [], mime: row.mime, poster: Boolean(row.has_poster),
-    featured: Boolean(row.featured), views: row.views, date: row.approved_at || row.created_at,
+    featured: Boolean(row.featured), views: row.views, date: row.approved_at || row.created_at, remix: Boolean(row.recipe),
     author: row.by_admin ? 'صوتك الذكي' : (row.author_name || '').trim() || 'مستخدم صوتك الذكي',
   };
 }
@@ -140,7 +156,7 @@ const isCategory = (v: unknown): v is Category => typeof v === 'string' && v in 
 /** Stores a new item from its bytes and returns it. `approved`: the admin's own work, shown at once. */
 async function addItem(o: {
   bytes: Buffer; kind: Kind; title: string; description: string; category: Category; tags: string;
-  userId: number | null; byAdmin: boolean; source: string;
+  userId: number | null; byAdmin: boolean; source: string; recipe?: Recipe | null;
 }): Promise<ItemRow> {
   const type = sniff(o.bytes);
   const wanted = AUDIO_KINDS.includes(o.kind) ? 'audio' : o.kind === 'image' ? 'image' : null;
@@ -148,9 +164,10 @@ async function addItem(o: {
   // A greeting card or motion graphic can be a picture or a video; voices must be sound, pictures pictures
   if (wanted ? type.media !== wanted : type.media === 'audio') throw Object.assign(new Error(`الملف لا يناسب النوع «${KINDS[o.kind]}»`), { status: 400 });
   const row = db.prepare(`
-    INSERT INTO gallery_items (kind, title, description, category, tags, ext, mime, user_id, by_admin, status, source, approved_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o.byAdmin ? "datetime('now')" : 'NULL'})
-  `).run(o.kind, o.title, o.description, o.category, o.tags, type.ext, type.mime, o.userId, o.byAdmin ? 1 : 0, o.byAdmin ? 'approved' : 'pending', o.source);
+    INSERT INTO gallery_items (kind, title, description, category, tags, ext, mime, user_id, by_admin, status, source, recipe, approved_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o.byAdmin ? "datetime('now')" : 'NULL'})
+  `).run(o.kind, o.title, o.description, o.category, o.tags, type.ext, type.mime, o.userId, o.byAdmin ? 1 : 0, o.byAdmin ? 'approved' : 'pending', o.source,
+    o.recipe ? JSON.stringify(o.recipe) : null);
   const id = Number(row.lastInsertRowid);
   try {
     await putMedia(fileKey({ id, ext: type.ext }), o.bytes, type.mime);
@@ -337,6 +354,35 @@ async function toolFile(source: string, ref: string): Promise<Buffer | null> {
   }
 }
 
+/**
+ * The recipe behind something made in an admin tool, from the small job file the tool keeps. None when it started
+ * from the admin's own picture (a customer could not repeat it), and never the admin's voice fingerprint.
+ */
+async function toolRecipe(source: string, ref: string): Promise<Recipe | null> {
+  const id = /^[A-Za-z0-9_-]{4,80}$/.test(ref) ? ref : null;
+  if (!id) return null;
+  const data = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
+  const json = (p: string) => fs.readFile(p, 'utf8').then(t => JSON.parse(t), () => null);
+  if (source === 'ai-image') {
+    const j = await json(path.join(data, 'ai-image', `${id}.json`));
+    return j && !j.edit ? { type: 'image', model: j.model, prompt: j.prompt, aspectRatio: j.aspectRatio || undefined, resolution: j.resolution } : null;
+  }
+  if (source === 'ai-video') {
+    const j = await json(path.join(data, 'ai-video', `${id}.json`));
+    return j && !j.image ? { type: 'video', model: j.model, prompt: j.prompt, resolution: j.resolution, aspectRatio: j.aspectRatio, duration: j.duration, sound: Boolean(j.sound) } : null;
+  }
+  if (source === 'auto-reel') {
+    const r = await json(path.join(data, 'auto-reel', id, 'reel.json'));
+    if (!r) return null;
+    return {
+      type: 'reel', idea: r.idea, dialect: r.dialect,
+      voice: String(r.voice).startsWith('custom:') ? 'Kore' : r.voice,
+      imageModel: r.imageModel, videoModel: r.videoModel, resolution: r.resolution, seconds: r.targetSeconds, videoScenes: r.videoScenes,
+    };
+  }
+  return null;
+}
+
 galleryAdminRouter.post('/from', async (req, res) => {
   try {
     const b = req.body ?? {};
@@ -348,6 +394,7 @@ galleryAdminRouter.post('/from', async (req, res) => {
     const item = await addItem({
       bytes, kind: b.kind, title, description: clean(b.description, 500), category: isCategory(b.category) ? b.category : 'other',
       tags: cleanTags(b.tags), userId: req.user!.id, byAdmin: true, source: String(b.source),
+      recipe: await toolRecipe(String(b.source), String(b.ref)),
     });
     res.json({ success: true, item: publicItem(item) });
   } catch (error: any) {

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioLines, Download, Eye, Link2, Loader2, Play, Plus, Search, Star, Trash2, Upload, X } from 'lucide-react';
+import { AudioLines, Download, Eye, Link2, Loader2, Play, Plus, Search, Star, Trash2, Upload, Wand2, X } from 'lucide-react';
 import { AuthUser } from '../types/auth';
 import { AUDIO_KINDS, CATEGORY_LABELS, GalleryCategory, GalleryKind, KIND_LABELS, uploadToGallery } from './GalleryShare';
+import { RemixPanel } from './RemixPanel';
 
 // The public gallery ("معرض الأعمال", #/gallery): what was made on the site, searchable by words, kind and category.
 // Anyone can browse; signed-in customers share their own work, which waits for an admin's approval (server/gallery.ts).
@@ -21,11 +22,14 @@ interface Item {
   author: string;
   status?: 'pending' | 'approved' | 'rejected';
   rejectReason?: string | null;
+  remix?: boolean;          // can be made again with the customer's own words
 }
 
 interface Props {
   user: AuthUser | null;
   onLoginRequired: (reason: string) => void;
+  onCredits: (credits: number) => void;
+  onOpenPackages: () => void;
 }
 
 const file = (id: number) => `/api/gallery/${id}/file`;
@@ -56,6 +60,7 @@ const Card: React.FC<{ item: Item; onOpen: () => void }> = ({ item, onOpen }) =>
         </span>
       )}
       <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white">{KIND_LABELS[item.kind]}</span>
+      {item.remix && <span className="absolute bottom-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-sky-500 text-slate-950 font-bold flex items-center gap-0.5"><Wand2 className="w-3 h-3" /> اصنع مثله</span>}
       {item.featured && <span className="absolute top-2 left-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-bold flex items-center gap-0.5"><Star className="w-3 h-3" /> مميّز</span>}
     </div>
     <div className="p-2.5 space-y-0.5">
@@ -68,7 +73,7 @@ const Card: React.FC<{ item: Item; onOpen: () => void }> = ({ item, onOpen }) =>
   </button>
 );
 
-const Viewer: React.FC<{ item: Item; onClose: () => void }> = ({ item, onClose }) => {
+const Viewer: React.FC<{ item: Item; onClose: () => void } & Props> = ({ item, onClose, ...remix }) => {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     fetch(`/api/gallery/${item.id}/view`, { method: 'POST' }).catch(() => {});
@@ -113,8 +118,9 @@ const Viewer: React.FC<{ item: Item; onClose: () => void }> = ({ item, onClose }
               <Link2 className="w-3.5 h-3.5" /> {copied ? 'نُسخ الرابط' : 'نسخ الرابط'}
             </button>
             <a href={`${file(item.id)}?download=1`} className="flex items-center gap-1 text-xs text-slate-300 hover:text-amber-300"><Download className="w-3.5 h-3.5" /> تحميل</a>
-            <a href="#/" className="mr-auto text-xs font-bold text-amber-400 hover:text-amber-300">اصنع مثله على صوتك الذكي ←</a>
+            {!item.remix && <a href="#/" className="mr-auto text-xs font-bold text-amber-400 hover:text-amber-300">اصنع مثله على صوتك الذكي ←</a>}
           </div>
+          {item.remix && <RemixPanel itemId={item.id} {...remix} />}
         </div>
       </div>
     </div>
@@ -230,7 +236,7 @@ const STATUS: Record<NonNullable<Item['status']>, { label: string; tone: string 
   rejected: { label: 'مرفوض', tone: 'text-rose-300' },
 };
 
-export const GalleryPage: React.FC<Props> = ({ user, onLoginRequired }) => {
+export const GalleryPage: React.FC<Props> = ({ user, onLoginRequired, onCredits, onOpenPackages }) => {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [items, setItems] = useState<Item[]>([]);
   const [more, setMore] = useState(false);
@@ -244,6 +250,7 @@ export const GalleryPage: React.FC<Props> = ({ user, onLoginRequired }) => {
   const [open, setOpen] = useState<Item | null>(null);
   const [sharing, setSharing] = useState(false);
   const [mine, setMine] = useState<Item[]>([]);
+  const [made, setMade] = useState<{ id: string; status: string; error: string | null; points: number; createdAt: string; resultType: string | null; file: string | null; input: Record<string, string> }[]>([]);
   const request = useRef(0);
 
   // Typing settles for a moment before searching
@@ -273,8 +280,9 @@ export const GalleryPage: React.FC<Props> = ({ user, onLoginRequired }) => {
   }, []);
 
   const loadMine = useCallback(() => {
-    if (!user) return setMine([]);
+    if (!user) { setMine([]); setMade([]); return; }
     fetch('/api/gallery/mine').then(r => r.json()).then(d => setMine(d.items ?? [])).catch(() => {});
+    fetch('/api/remix/mine').then(r => r.json()).then(d => setMade(d.remixes ?? [])).catch(() => {});
   }, [user]);
   useEffect(loadMine, [loadMine]);
 
@@ -367,7 +375,36 @@ export const GalleryPage: React.FC<Props> = ({ user, onLoginRequired }) => {
         </div>
       )}
 
-      {open && <Viewer item={open} onClose={close} />}
+      {made.length > 0 && (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold text-white">ما صنعته من المعرض</div>
+            <button type="button" onClick={loadMine} className="text-[11px] text-slate-400 hover:text-white">تحديث</button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {made.map(m => (
+              <div key={m.id} className="bg-slate-950/50 border border-slate-800 rounded-lg p-2 space-y-1">
+                {m.status === 'done' && m.file ? (
+                  m.resultType?.startsWith('image/')
+                    ? <img src={m.file} alt="" loading="lazy" className="w-full aspect-square object-cover rounded" />
+                    : <video src={m.file} controls playsInline preload="none" className="w-full aspect-square object-cover rounded bg-black" />
+                ) : (
+                  <div className="w-full aspect-square rounded bg-slate-900 flex items-center justify-center text-[11px] text-slate-400 text-center px-2">
+                    {m.status === 'working' ? 'يُصنع الآن…' : `لم يكتمل، أُعيدت النقاط${m.error ? ` (${m.error})` : ''}`}
+                  </div>
+                )}
+                <div className="text-[11px] text-slate-300 line-clamp-2">{Object.values(m.input)[0]}</div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>{m.points} نقطة</span>
+                  {m.file && <a href={`${m.file}?download=1`} className="flex items-center gap-0.5 hover:text-amber-300"><Download className="w-3 h-3" /> تحميل</a>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {open && <Viewer item={open} onClose={close} user={user} onLoginRequired={onLoginRequired} onCredits={onCredits} onOpenPackages={onOpenPackages} />}
       {sharing && <ShareForm onClose={() => setSharing(false)} onDone={loadMine} />}
     </div>
   );
