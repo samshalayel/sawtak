@@ -7,6 +7,7 @@ interface Options {
   maxUsd: number;
   pictureGuessUsd: number;
   voices: { id: string; name: string; gender: string }[];
+  customVoices: { id: string; name: string }[];
   dialects: { id: string; label: string }[];
   videoModels: VideoOption[];
   imageModels: { id: string; name: string; vertical: boolean; outputPerM: number | null }[];
@@ -75,7 +76,7 @@ interface AvatarTest {
 }
 
 /** Trial of a talking presenter: a photo and one sentence in the studio's voice, lip-synced by an avatar model. */
-const AvatarTrial: React.FC<{ voices: Options['voices'] }> = ({ voices }) => {
+const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['customVoices'] }> = ({ voices, customVoices }) => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [text, setText] = useState('أهلاً بكم، اليوم رح نشرح لكم فكرة بسيطة بدقيقة وحدة.');
   const [voice, setVoice] = useState(voices[0]?.id ?? '');
@@ -131,7 +132,14 @@ const AvatarTrial: React.FC<{ voices: Options['voices'] }> = ({ voices }) => {
         <label className="block">
           <span className="text-xs font-semibold text-slate-300">الصوت</span>
           <select value={voice} onChange={e => setVoice(e.target.value)} className={field}>
-            {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {customVoices.length > 0 && (
+              <optgroup label="أصواتي (البصمة الصوتية)">
+                {customVoices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+            <optgroup label="أصوات الاستوديو">
+              {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </optgroup>
           </select>
         </label>
       </div>
@@ -308,7 +316,14 @@ export const AutoReelTab: React.FC = () => {
             <label className="block">
               <span className={label}>الصوت</span>
               <select value={voice} onChange={e => setVoice(e.target.value)} className={field}>
-                {options.voices.map(v => <option key={v.id} value={v.id}>{v.name} ({v.gender === 'female' ? 'أنثى' : 'ذكر'})</option>)}
+                {options.customVoices.length > 0 && (
+                  <optgroup label="أصواتي (البصمة الصوتية)">
+                    {options.customVoices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="أصوات الاستوديو">
+                  {options.voices.map(v => <option key={v.id} value={v.id}>{v.name} ({v.gender === 'female' ? 'أنثى' : 'ذكر'})</option>)}
+                </optgroup>
               </select>
             </label>
             <label className="block">
@@ -459,7 +474,7 @@ export const AutoReelTab: React.FC = () => {
         </div>
       )}
 
-      {options && <AvatarTrial voices={options.voices} />}
+      {options && <AvatarTrial voices={options.voices} customVoices={options.customVoices} />}
 
       <div className={`${card} space-y-2`}>
         <div className="text-sm font-bold text-white">الريلز ({reels.length})</div>

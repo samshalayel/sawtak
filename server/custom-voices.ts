@@ -459,3 +459,19 @@ customVoicesRouter.delete('/:id', async (req, res) => {
   await fs.rm(referencePath(voice.id), { force: true }).catch(() => {});
   res.json({ success: true });
 });
+
+// ---------- For other admin tools (automatic reels) ----------
+
+/** The custom voices, newest first, as other tools list them. */
+export const listCustomVoices = () =>
+  (db.prepare('SELECT id, name FROM custom_voices ORDER BY id DESC').all() as { id: number; name: string }[]);
+
+/**
+ * `text` in a custom voice, as a WAV. OpenRouter clones get no style: a direction pulls them away from the voice
+ * (the fingerprint trials sounded closest without one).
+ */
+export async function speakCustomVoiceById(id: number, text: string, style: string): Promise<Buffer> {
+  const voice = getVoice(id);
+  if (!voice) throw new Error('الصوت المخصص غير موجود');
+  return isOpenRouterVoice(voice) ? (await speakWithOpenRouter(voice, text, '')).wav : (await speakWithCustomVoice(voice, text, style)).wav;
+}

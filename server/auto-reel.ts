@@ -14,6 +14,7 @@ import { saveVideo, videoModels } from './ai-video.ts';
 import { openRouterStats } from './openrouter-stats.ts';
 import { ARABIC_FONT, assText, assTime, captionChunks, runFfmpeg, speechIntervals } from './video.ts';
 import { VOICES } from '../src/data/presets.ts';
+import { listCustomVoices, speakCustomVoiceById } from './custom-voices.ts';
 
 const base = () => process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1';
 const key = () => process.env.OPENROUTER_API_KEY || '';
@@ -30,6 +31,17 @@ const CLIP_WAIT_MS = 20 * 60_000;
 type Speak = (text: string, voice: string, style: string) => Promise<Buffer | null>;
 let speak: Speak | null = null;
 export const setAutoReelSpeech = (fn: Speak) => { speak = fn; };
+
+// A voice is a studio voice id, or "custom:<id>" for a voice fingerprint (custom-voices.ts)
+const customId = (voice: string) => (/^custom:\d+$/.test(voice) ? Number(voice.slice(7)) : null);
+const knownVoice = (voice: unknown) =>
+  typeof voice === 'string' && (VOICES.some(v => v.id === voice) || (customId(voice) !== null && listCustomVoices().some(v => v.id === customId(voice))));
+async function say(text: string, voice: string, style: string): Promise<Buffer | null> {
+  const id = customId(voice);
+  if (id !== null) return speakCustomVoiceById(id, text, style);
+  if (!speak) throw new Error('محرك الصوت غير متاح');
+  return speak(text, voice, style);
+}
 
 export const autoReelRouter = express.Router();
 
@@ -309,14 +321,13 @@ async function pipeline(reel: Reel) {
     // The voice, scene by scene, so each scene knows its length
     reel.stage = 'voice';
     await writeReel(reel);
-    if (!speak) throw new Error('محرك الصوت غير متاح');
     await eachLimit(reel.scenes.map((s, i) => i), 3, async i => {
       const s = reel.scenes[i];
       const file = fileOf(reel.id, `scene-${i}.wav`);
       try {
         s.error = undefined;
         if (!(await exists(file))) {
-          const wav = await speak!(s.narration, reel.voice, reel.delivery || 'Natural, engaging narration for a short video');
+          const wav = await say(s.narration, reel.voice, reel.delivery || 'Natural, engaging narration for a short video');
           if (!wav) throw new Error('لم يرجع صوت');
           await fs.writeFile(file, wav);
         }
@@ -404,6 +415,7 @@ autoReelRouter.get('/options', async (_req, res) => {
       maxUsd: maxUsd(),
       pictureGuessUsd: PICTURE_GUESS_USD,
       voices: VOICES.map(v => ({ id: v.id, name: v.name, gender: v.gender })),
+      customVoices: listCustomVoices().map(v => ({ id: `custom:${v.id}`, name: v.name })),
       dialects: Object.entries(DIALECTS).map(([id, d]) => ({ id, label: d.label })),
       // Vertical clips priced per second only
       videoModels: videos
@@ -424,7 +436,7 @@ autoReelRouter.post('/', async (req, res) => {
     const idea = String(b.idea || '').trim().slice(0, 2000);
     if (idea.length < 5) return res.status(400).json({ success: false, error: 'اكتب فكرة الريل' });
     const dialect = DIALECTS[b.dialect] ? b.dialect : 'msa';
-    const voice = VOICES.some(v => v.id === b.voice) ? b.voice : VOICES[0].id;
+    const voice = knownVoice(b.voice) ? b.voice : VOICES[0].id;
     const video = (await videoModels()).find(m => m.id === b.videoModel);
     if (!video || !video.aspectRatios.includes('9:16')) return res.status(400).json({ success: false, error: 'اختر نموذج فيديو يدعم 9:16' });
     const resolution = String(b.resolution || '');
@@ -530,8 +542,7 @@ async function writeAvatar(t: AvatarTest) {
 
 async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: string) {
   try {
-    if (!speak) throw new Error('محرك الصوت غير متاح');
-    const wav = await speak(t.text, t.voice, 'Natural, friendly presenter explaining to the camera');
+    const wav = await say(t.text, t.voice, 'Natural, friendly presenter explaining to the camera');
     if (!wav) throw new Error('لم يرجع صوت');
     await fs.writeFile(avatarFile(t.id, 'voice.wav'), wav);
     t.seconds = Math.round(speechIntervals(wav).duration * 100) / 100;
@@ -595,7 +606,7 @@ autoReelRouter.post('/avatar-test', async (req, res) => {
   if (!/^data:image\/(png|jpe?g|webp);base64,/.test(photo) || photo.length > 6_000_000) return res.status(400).json({ success: false, error: 'ارفع صورة (PNG أو JPG، أقل من 4 ميغابايت)' });
   const text = String(req.body?.text || '').trim().slice(0, 200);
   if (text.length < 5) return res.status(400).json({ success: false, error: 'اكتب جملة قصيرة' });
-  const voice = VOICES.some(v => v.id === req.body?.voice) ? req.body.voice : VOICES[0].id;
+  const voice = knownVoice(req.body?.voice) ? req.body.voice : VOICES[0].id;
   const t: AvatarTest = { id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), text, voice, status: 'working', attempts: [] };
   await writeAvatar(t);
   running.add(t.id);
