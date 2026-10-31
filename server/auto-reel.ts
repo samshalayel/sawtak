@@ -2,7 +2,8 @@
 // of about a minute, every step written and made by AI. A text model plans the reel (the narration of each scene, the
 // picture that opens it and how it moves), the studio's voice speaks each scene, an image model paints each opening
 // picture, a video model animates it into a clip as long as its narration, and ffmpeg joins the clips with the voice
-// and burnt-in captions. Everything made is kept in DATA_DIR/auto-reel/<id>, so a reel that stopped (a refusal, the
+// and burnt-in captions. To spend less, only some scenes can be real clips: the others are their picture with a slow
+// zoom made here for free. Everything made is kept in DATA_DIR/auto-reel/<id>, so a reel that stopped (a refusal, the
 // spending cap, a restart) resumes where it was without paying twice for what is already there.
 import express from 'express';
 import crypto from 'crypto';
@@ -47,6 +48,7 @@ interface Scene {
   motionPrompt: string;     // English: what moves and how the camera moves
   seconds?: number;         // length of the narration
   clipSeconds?: number;     // length of the clip asked for
+  still?: boolean;          // shown as its picture with a slow zoom instead of a paid clip
   videoId?: string;         // the clip's job at OpenRouter, kept so a resume follows it instead of paying again
   imageCostUsd?: number;
   clipCostUsd?: number;
@@ -67,6 +69,8 @@ interface Reel {
   resolution: string;
   targetSeconds: number;
   sceneCount: number;
+  /** How many scenes are real clips (the rest are zoomed pictures); undefined: all of them. */
+  videoScenes?: number;
   estimateUsd: number;
   stage: Stage;
   error?: string;
@@ -146,6 +150,14 @@ async function writePlan(reel: Reel, clip: number) {
   reel.scenes = scenes;
   const cost = Number(data?.usage?.cost);
   if (Number.isFinite(cost)) reel.planCostUsd = cost;
+}
+
+/** Which scenes get a real clip when only `count` of `total` do: the first, the last, and the rest spread between. */
+export function animatedScenes(total: number, count: number): Set<number> {
+  if (count >= total) return new Set(Array.from({ length: total }, (_, i) => i));
+  if (count <= 0) return new Set();
+  if (count === 1) return new Set([0]);
+  return new Set(Array.from({ length: count }, (_, k) => Math.round((k * (total - 1)) / (count - 1))));
 }
 
 // ---------- Steps 2–4: voice, pictures, clips ----------
@@ -244,13 +256,20 @@ async function assemble(reel: Reel) {
   // the clips' own sound (if any) is dropped for the narration
   const inputs: string[] = [];
   const parts: string[] = [];
-  reel.scenes.forEach((_, i) => {
-    inputs.push('-i', `scene-${i}.mp4`, '-i', `scene-${i}.wav`);
+  reel.scenes.forEach((scene, i) => {
     const d = lengths[i].toFixed(3);
-    parts.push(
-      `[${2 * i}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=30,trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`,
-      `[${2 * i + 1}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=duration=${d},asetpts=PTS-STARTPTS[a${i}]`,
-    );
+    if (scene.still) {
+      // The picture with a slow zoom, in on one still scene and out on the next (drawn larger first so it stays smooth)
+      const frames = Math.ceil(lengths[i] * 30) + 2;
+      const zoom = i % 2 === 0 ? `1+0.12*on/${frames}` : `1.12-0.12*on/${frames}`;
+      const [BW, BH] = [Math.round(W * 1.5 / 2) * 2, Math.round(H * 1.5 / 2) * 2];
+      inputs.push('-i', `scene-${i}.jpg`, '-i', `scene-${i}.wav`);
+      parts.push(`[${2 * i}:v]scale=${BW}:${BH}:force_original_aspect_ratio=increase,crop=${BW}:${BH},zoompan=z='${zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=30,setsar=1,format=yuv420p,trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`);
+    } else {
+      inputs.push('-i', `scene-${i}.mp4`, '-i', `scene-${i}.wav`);
+      parts.push(`[${2 * i}:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=30,setsar=1,format=yuv420p,tpad=stop_mode=clone:stop_duration=30,trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`);
+    }
+    parts.push(`[${2 * i + 1}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=duration=${d},asetpts=PTS-STARTPTS[a${i}]`);
   });
   const joined = reel.scenes.map((_, i) => `[v${i}][a${i}]`).join('');
   parts.push(`${joined}concat=n=${reel.scenes.length}:v=1:a=1[vc][ac]`);
@@ -282,6 +301,8 @@ async function pipeline(reel: Reel) {
       reel.stage = 'planning';
       await writeReel(reel);
       await writePlan(reel, baseClip(video.durations));
+      const animated = animatedScenes(reel.scenes.length, reel.videoScenes ?? reel.scenes.length);
+      reel.scenes.forEach((s, i) => { s.still = !animated.has(i); });
       await writeReel(reel);
     }
 
@@ -339,7 +360,7 @@ async function pipeline(reel: Reel) {
     const rate = video.prices[reel.resolution]?.silent;
     if (rate == null) throw new Error('سعر نموذج الفيديو غير معروف');
     const missing: number[] = [];
-    for (const [i, s] of reel.scenes.entries()) if (!(await exists(fileOf(reel.id, `scene-${i}.mp4`)))) missing.push(i);
+    for (const [i, s] of reel.scenes.entries()) if (!s.still && !(await exists(fileOf(reel.id, `scene-${i}.mp4`)))) missing.push(i);
     const toPay = missing.filter(i => !reel.scenes[i].videoId).reduce((sum, i) => sum + rate * (reel.scenes[i].clipSeconds ?? 0), 0);
     if (spent(reel) + toPay > maxUsd()) throw new Error(`تكلفة المقاطع $${toPay.toFixed(2)} تتجاوز حد الريل ($${maxUsd()})`);
     const stats = await openRouterStats().catch(() => null);
@@ -414,13 +435,15 @@ autoReelRouter.post('/', async (req, res) => {
     const targetSeconds = Math.min(90, Math.max(20, Math.round(Number(b.seconds) || 60)));
     const clip = baseClip(video.durations);
     const sceneCount = Math.min(12, Math.max(2, Math.round(targetSeconds / clip)));
-    const estimateUsd = Math.round((sceneCount * (rate * clip + PICTURE_GUESS_USD) + 0.01) * 100) / 100;
+    const wanted = Math.round(Number(b.videoScenes));
+    const videoScenes = Number.isFinite(wanted) && wanted >= 0 && wanted < sceneCount ? wanted : undefined;
+    const estimateUsd = Math.round(((videoScenes ?? sceneCount) * rate * clip + sceneCount * PICTURE_GUESS_USD + 0.01) * 100) / 100;
     if (estimateUsd > maxUsd()) return res.status(400).json({ success: false, error: `التكلفة المقدّرة $${estimateUsd} تتجاوز حد الريل ($${maxUsd()})` });
     if (running.size >= 2) return res.status(429).json({ success: false, error: 'هناك ريلز قيد العمل الآن، انتظر حتى تنتهي' });
 
     const reel: Reel = {
       id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), idea, dialect, voice,
-      imageModel: picture.id, videoModel: video.id, videoModelName: video.name, resolution, targetSeconds, sceneCount, estimateUsd,
+      imageModel: picture.id, videoModel: video.id, videoModelName: video.name, resolution, targetSeconds, sceneCount, videoScenes, estimateUsd,
       stage: 'planning', scenes: [],
     };
     await writeReel(reel);

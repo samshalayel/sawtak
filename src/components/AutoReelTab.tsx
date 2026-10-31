@@ -18,6 +18,7 @@ interface Scene {
   motionPrompt: string;
   seconds?: number;
   clipSeconds?: number;
+  still?: boolean;
   videoId?: string;
   imageCostUsd?: number;
   clipCostUsd?: number;
@@ -75,6 +76,7 @@ export const AutoReelTab: React.FC = () => {
   const [imageModel, setImageModel] = useState('');
   const [videoModel, setVideoModel] = useState('');
   const [resolution, setResolution] = useState('');
+  const [videoScenes, setVideoScenes] = useState<number | 'all'>('all');
   const [busy, setBusy] = useState(false);
 
   const [openId, setOpenId] = useState<string | null>(null);
@@ -131,17 +133,18 @@ export const AutoReelTab: React.FC = () => {
   const clip = video ? baseClip(video.durations) : 0;
   const scenes = clip ? Math.min(12, Math.max(2, Math.round(seconds / clip))) : 0;
   const rate = video?.prices[resolution] ?? null;
-  const estimate = options && rate != null ? scenes * (rate * clip + options.pictureGuessUsd) + 0.01 : null;
+  const animated = videoScenes === 'all' || videoScenes >= scenes ? scenes : videoScenes;
+  const estimate = options && rate != null ? animated * rate * clip + scenes * options.pictureGuessUsd + 0.01 : null;
 
   const start = async () => {
     if (estimate === null) return;
-    if (!window.confirm(`${scenes} مشاهد × ${clip} ثوانٍ. التكلفة التقريبية ${usd(estimate)} من رصيد OpenRouter. نبدأ؟`)) return;
+    if (!window.confirm(`${scenes} مشاهد × ${clip} ثوانٍ (${animated} منها فيديو). التكلفة التقريبية ${usd(estimate)} من رصيد OpenRouter. نبدأ؟`)) return;
     setBusy(true);
     setError(null);
     try {
       const d = await api<{ reel: Reel }>('/api/admin/auto-reel', {
         method: 'POST',
-        body: JSON.stringify({ idea, dialect, voice, seconds, imageModel, videoModel, resolution }),
+        body: JSON.stringify({ idea, dialect, voice, seconds, imageModel, videoModel, resolution, videoScenes: animated < scenes ? animated : undefined }),
       });
       loadReels();
       setOpenId(d.reel.id);
@@ -241,6 +244,18 @@ export const AutoReelTab: React.FC = () => {
               </label>
             )}
           </div>
+          {scenes > 1 && (
+            <label className="block max-w-sm">
+              <span className={label}>مشاهد الفيديو الحقيقي (الباقي صورة بزوم بطيء مجاناً)</span>
+              <select value={videoScenes} onChange={e => setVideoScenes(e.target.value === 'all' ? 'all' : Number(e.target.value))} className={field}>
+                <option value="all">كل المشاهد فيديو ({scenes})</option>
+                {Array.from({ length: scenes }, (_, n) => n).reverse().slice(1).map(n => (
+                  <option key={n} value={n}>{n === 0 ? 'ولا مشهد: كلها صور بزوم (الأرخص)' : `${n} من ${scenes}${n >= 2 ? ' (الأول والأخير وبينهما)' : ' (الأول)'}`}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {video && !video.firstFrame && (
             <div className="text-[11px] text-amber-300">هذا النموذج لا يبدأ من صورة: المقاطع تُصنع من الوصف فقط، والصور تبقى للمعاينة.</div>
           )}
@@ -257,7 +272,7 @@ export const AutoReelTab: React.FC = () => {
             </button>
             {estimate !== null && (
               <span className="text-sm text-slate-200">
-                {scenes} مشاهد × {clip} ث · التكلفة التقريبية <b className="font-mono text-amber-300" dir="ltr">{usd(estimate)}</b>
+                {scenes} مشاهد × {clip} ث ({animated} فيديو) · التكلفة التقريبية <b className="font-mono text-amber-300" dir="ltr">{usd(estimate)}</b>
                 <span className="text-xs text-slate-500"> (الحد {usd(options.maxUsd)})</span>
               </span>
             )}
@@ -319,7 +334,7 @@ export const AutoReelTab: React.FC = () => {
               const has = (ext: string) => open.files.includes(`scene-${i}.${ext}`);
               return (
                 <div key={i} className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 space-y-2">
-                  <div className="text-[11px] text-slate-500">مشهد {i + 1}{s.seconds ? ` · ${s.seconds} ث صوت · مقطع ${s.clipSeconds} ث` : ''}</div>
+                  <div className="text-[11px] text-slate-500">مشهد {i + 1}{s.seconds ? ` · ${s.seconds} ث صوت` : ''}{s.still ? ' · صورة بزوم' : s.clipSeconds ? ` · مقطع ${s.clipSeconds} ث` : ''}</div>
                   {has('mp4') ? (
                     <video src={file(open.reel.id, `scene-${i}.mp4`)} controls muted loop playsInline poster={has('jpg') ? file(open.reel.id, `scene-${i}.jpg`) : undefined} className="w-full rounded-lg bg-black aspect-[9/16] object-cover" />
                   ) : has('jpg') ? (
