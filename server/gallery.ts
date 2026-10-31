@@ -1,17 +1,17 @@
 // The public gallery ("معرض الأعمال"): voices, voice fingerprints, videos, reels, pictures, motion graphics and
 // greeting cards made on the site, with search, kinds and categories, open to visitors. Customers share their own work
 // (with their consent to show it publicly) and it waits for an admin's approval; the admin's own work, shared from the
-// admin tools, goes up at once. Files live in DATA_DIR/gallery as <id>.<ext>, with a small <id>-poster.jpg for videos
-// and pictures so the grid loads light.
+// admin tools, goes up at once. Files are kept in the media storage (server/storage.ts: S3, or DATA_DIR) as
+// gallery/<id>.<ext>, with a small gallery/<id>-poster.jpg for videos and pictures so the grid loads light.
 import express from 'express';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
 import { db } from './db.ts';
 import { requireAuth } from './auth.ts';
+import { getMedia, putMedia, removeMedia, sendMedia } from './storage.ts';
 
-const DATA = () => path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
-const dir = () => path.join(DATA(), 'gallery');
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const MAX_UPLOAD = 60 * 1024 * 1024;
 const MAX_PENDING_PER_USER = 10;
@@ -73,8 +73,8 @@ interface ItemRow {
   featured: number; views: number; source: string; created_at: string; approved_at: string | null;
 }
 
-const fileOf = (row: Pick<ItemRow, 'id' | 'ext'>) => path.join(dir(), `${row.id}.${row.ext}`);
-const posterOf = (id: number) => path.join(dir(), `${id}-poster.jpg`);
+const fileKey = (row: Pick<ItemRow, 'id' | 'ext'>) => `gallery/${row.id}.${row.ext}`;
+const posterKey = (id: number) => `gallery/${id}-poster.jpg`;
 const getItem = (id: number) => db.prepare('SELECT * FROM gallery_items WHERE id = ?').get(id) as unknown as ItemRow | undefined;
 
 /** What visitors see of an item (never the owner's email). */
@@ -116,16 +116,19 @@ function ffmpeg(args: string[]): Promise<void> {
 }
 
 /** A small JPEG for the grid: a frame a second in (or the first) for videos, the picture itself scaled down for images. */
-async function makePoster(id: number, file: string, media: 'audio' | 'video' | 'image'): Promise<boolean> {
-  if (media === 'audio') return false;
-  const out = posterOf(id);
-  const scale = ['-vf', 'scale=480:-2', '-frames:v', '1', '-q:v', '4', out];
+async function makePoster(bytes: Buffer, ext: string, media: 'audio' | 'video' | 'image'): Promise<Buffer | null> {
+  if (media === 'audio') return null;
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'sawtik-poster-'));
   try {
-    await ffmpeg(media === 'video' ? ['-ss', '1', '-i', file, ...scale] : ['-i', file, ...scale]);
-    return true;
-  } catch {
-    if (media !== 'video') return false;
-    return ffmpeg(['-i', file, ...scale]).then(() => true, () => false);
+    const file = path.join(work, `in.${ext}`);
+    const out = path.join(work, 'poster.jpg');
+    await fs.writeFile(file, bytes);
+    const scale = ['-vf', 'scale=480:-2', '-frames:v', '1', '-q:v', '4', out];
+    const made = await ffmpeg(media === 'video' ? ['-ss', '1', '-i', file, ...scale] : ['-i', file, ...scale]).then(() => true, () => false)
+      || (media === 'video' && await ffmpeg(['-i', file, ...scale]).then(() => true, () => false));
+    return made ? await fs.readFile(out) : null;
+  } finally {
+    await fs.rm(work, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -149,16 +152,23 @@ async function addItem(o: {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o.byAdmin ? "datetime('now')" : 'NULL'})
   `).run(o.kind, o.title, o.description, o.category, o.tags, type.ext, type.mime, o.userId, o.byAdmin ? 1 : 0, o.byAdmin ? 'approved' : 'pending', o.source);
   const id = Number(row.lastInsertRowid);
-  await fs.mkdir(dir(), { recursive: true });
-  const file = fileOf({ id, ext: type.ext });
-  await fs.writeFile(file, o.bytes);
-  if (await makePoster(id, file, type.media)) db.prepare('UPDATE gallery_items SET has_poster = 1 WHERE id = ?').run(id);
+  try {
+    await putMedia(fileKey({ id, ext: type.ext }), o.bytes, type.mime);
+  } catch (error) {
+    db.prepare('DELETE FROM gallery_items WHERE id = ?').run(id);
+    throw error;
+  }
+  const poster = await makePoster(o.bytes, type.ext, type.media);
+  if (poster) {
+    await putMedia(posterKey(id), poster, 'image/jpeg');
+    db.prepare('UPDATE gallery_items SET has_poster = 1 WHERE id = ?').run(id);
+  }
   return getItem(id)!;
 }
 
 async function removeItem(row: ItemRow) {
   db.prepare('DELETE FROM gallery_items WHERE id = ?').run(row.id);
-  await Promise.all([fs.rm(fileOf(row), { force: true }), fs.rm(posterOf(row.id), { force: true })]);
+  await removeMedia(fileKey(row), posterKey(row.id));
 }
 
 // ---------- Public: browse, and customers share their work ----------
@@ -215,16 +225,14 @@ const canSee = (req: express.Request, row: ItemRow) => row.status === 'approved'
 galleryRouter.get('/:id/file', (req, res) => {
   const row = getItem(Number(req.params.id));
   if (!row || !canSee(req, row)) return res.status(404).end();
-  res.set('Cache-Control', row.status === 'approved' ? 'public, max-age=86400' : 'private, no-store');
-  if (req.query.download) res.attachment(`sawtik-${row.id}.${row.ext}`);
-  res.type(row.mime).sendFile(fileOf(row), error => { if (error && !res.headersSent) res.status(404).end(); });
+  sendMedia(res, fileKey(row), { type: row.mime, download: req.query.download ? `sawtik-${row.id}.${row.ext}` : undefined, cache: row.status === 'approved' ? 'public' : 'private' })
+    .catch(() => res.status(404).end());
 });
 
 galleryRouter.get('/:id/poster', (req, res) => {
   const row = getItem(Number(req.params.id));
   if (!row || !row.has_poster || !canSee(req, row)) return res.status(404).end();
-  res.set('Cache-Control', row.status === 'approved' ? 'public, max-age=86400' : 'private, no-store');
-  res.type('image/jpeg').sendFile(posterOf(row.id), error => { if (error && !res.headersSent) res.status(404).end(); });
+  sendMedia(res, posterKey(row.id), { type: 'image/jpeg', cache: row.status === 'approved' ? 'public' : 'private' }).catch(() => res.status(404).end());
 });
 
 // The file is the request body itself (no base64), the details are in the query string
@@ -317,15 +325,14 @@ galleryAdminRouter.delete('/:id', async (req, res) => {
 async function toolFile(source: string, ref: string): Promise<Buffer | null> {
   const id = /^[A-Za-z0-9_-]{4,80}$/.test(ref) ? ref : null;
   if (!id) return null;
-  const read = (p: string) => fs.readFile(p).catch(() => null);
   switch (source) {
     case 'ai-image': {
-      for (const ext of ['png', 'jpg', 'webp']) { const b = await read(path.join(DATA(), 'ai-image', `${id}-0.${ext}`)); if (b) return b; }
+      for (const ext of ['png', 'jpg', 'webp']) { const b = await getMedia(`ai-image/${id}-0.${ext}`); if (b) return b; }
       return null;
     }
-    case 'ai-video': return read(path.join(DATA(), 'ai-video', `${id}.mp4`));
-    case 'auto-reel': return read(path.join(DATA(), 'auto-reel', id, 'final.mp4'));
-    case 'avatar-test': return read(path.join(DATA(), 'auto-reel', 'avatar-tests', `${id}-video.mp4`));
+    case 'ai-video': return getMedia(`ai-video/${id}.mp4`);
+    case 'auto-reel': return getMedia(`auto-reel/${id}/final.mp4`);
+    case 'avatar-test': return getMedia(`auto-reel/avatar-tests/${id}-video.mp4`);
     default: return null;
   }
 }

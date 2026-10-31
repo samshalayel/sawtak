@@ -14,6 +14,7 @@ import { perSecond, saveVideo, videoModels } from './ai-video.ts';
 import { openRouterStats } from './openrouter-stats.ts';
 import { ARABIC_FONT, assText, assTime, captionChunks, runFfmpeg, speechIntervals } from './video.ts';
 import { VOICES } from '../src/data/presets.ts';
+import { putMediaFile, removeMedia, removeMediaFolder, sendMedia, typeOf } from './storage.ts';
 import { listCustomVoices, speakCustomVoiceById } from './custom-voices.ts';
 
 const base = () => process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1';
@@ -92,6 +93,7 @@ interface Reel {
   planCostUsd?: number;
   scenes: Scene[];
   duration?: number;        // of the finished video
+  stored?: string[];        // files moved to the media storage once finished (server/storage.ts)
 }
 
 const safeId = (id: unknown): string | null => (typeof id === 'string' && /^[a-f0-9]{16}$/.test(id) ? id : null);
@@ -108,6 +110,24 @@ async function writeReel(reel: Reel) {
 }
 
 const running = new Set<string>();
+
+const MEDIA_NAME = /^(scene-\d{1,2}\.(jpg|mp4|wav)|final\.mp4)$/;
+/** A finished reel's pictures, clips, voices and video go to the media storage; its small reel.json stays here. */
+async function storeReel(reel: Reel) {
+  const names = (await fs.readdir(dirOf(reel.id)).catch(() => [] as string[])).filter(n => MEDIA_NAME.test(n));
+  for (const name of names) await putMediaFile(`auto-reel/${reel.id}/${name}`, fileOf(reel.id, name), typeOf(name));
+  reel.stored = [...new Set([...(reel.stored ?? []), ...names])];
+}
+
+/** Sends a reel or trial file from this server while it is being made, else from the media storage. */
+async function sendFile(res: express.Response, file: string, key: string, download?: string) {
+  if (await exists(file)) {
+    res.set('Cache-Control', 'private, max-age=3600');
+    if (download) res.attachment(download);
+    return res.sendFile(file, error => { if (error && !res.headersSent) res.status(404).end(); });
+  }
+  sendMedia(res, key, { type: typeOf(file), download, cache: 'private' }).catch(() => res.status(404).end());
+}
 /** A reel left mid-way by a restart shows as stopped, ready to resume. */
 const shown = (r: Reel) => (r.stage !== 'done' && r.stage !== 'failed' && !running.has(r.id) ? { ...r, stage: 'failed' as Stage, error: r.error || 'توقف الخادم أثناء العمل، اضغط «أكمل»' } : r);
 const spent = (r: Reel) => (r.planCostUsd ?? 0) + r.scenes.reduce((sum, s) => sum + (s.imageCostUsd ?? 0) + (s.clipCostUsd ?? 0), 0);
@@ -393,6 +413,7 @@ async function pipeline(reel: Reel) {
     reel.stage = 'assembling';
     await writeReel(reel);
     await assemble(reel);
+    await storeReel(reel);
     reel.stage = 'done';
   } catch (error: any) {
     console.error(`[auto-reel] ${reel.id}:`, error?.message || error);
@@ -478,7 +499,7 @@ autoReelRouter.get('/:id', async (req, res) => {
   const id = safeId(req.params.id);
   const reel = id ? await readReel(id) : null;
   if (!reel) return res.status(404).json({ success: false, error: 'الريل غير موجود' });
-  const files = await fs.readdir(dirOf(reel.id)).catch(() => [] as string[]);
+  const files = [...new Set([...(await fs.readdir(dirOf(reel.id)).catch(() => [] as string[])), ...(reel.stored ?? [])])];
   res.json({ success: true, reel: { ...shown(reel), spentUsd: Math.round(spent(reel) * 10_000) / 10_000 }, files });
 });
 
@@ -495,10 +516,8 @@ autoReelRouter.post('/:id/resume', async (req, res) => {
 autoReelRouter.get('/:id/file/:name', async (req, res) => {
   const id = safeId(req.params.id);
   const name = String(req.params.name);
-  if (!id || !/^(scene-\d{1,2}\.(jpg|mp4|wav)|final\.mp4)$/.test(name)) return res.status(404).end();
-  res.set('Cache-Control', 'private, max-age=3600');
-  if (req.query.download) res.attachment(`reel-${id}-${name}`);
-  res.sendFile(fileOf(id, name), error => { if (error && !res.headersSent) res.status(404).end(); });
+  if (!id || !MEDIA_NAME.test(name)) return res.status(404).end();
+  sendFile(res, fileOf(id, name), `auto-reel/${id}/${name}`, req.query.download ? `reel-${id}-${name}` : undefined);
 });
 
 autoReelRouter.delete('/:id', async (req, res) => {
@@ -506,6 +525,7 @@ autoReelRouter.delete('/:id', async (req, res) => {
   if (!id || !(await readReel(id))) return res.status(404).json({ success: false, error: 'الريل غير موجود' });
   if (running.has(id)) return res.status(409).json({ success: false, error: 'الريل قيد العمل، انتظر حتى يتوقف' });
   await fs.rm(dirOf(id), { recursive: true, force: true });
+  await removeMediaFolder(`auto-reel/${id}/`);
   res.json({ success: true });
 });
 
@@ -516,6 +536,7 @@ autoReelRouter.delete('/:id', async (req, res) => {
 // temporary public link. Models that cannot take sound refuse the request, which costs nothing; every answer is kept.
 
 const avatarDir = () => path.join(root(), 'avatar-tests');
+const AVATAR_MEDIA = ['video.mp4', 'raw.mp4', 'voice.wav', 'photo.jpg'];
 const DEFAULT_MOTION = 'The person speaks naturally to the camera with natural expressions, subtle head movement and light hand gestures.';
 
 interface AvatarTest {
@@ -674,6 +695,9 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
         // Our own voice on the picture, whatever sound the model put there
         await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', `${t.id}-raw.mp4`, '-i', `${t.id}-voice.wav`, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', `${t.id}-video.mp4`],
           avatarDir(), { timeoutMs: 120_000, duration: 0 });
+        // What is kept goes to the media storage; the voice link was only needed while the model worked
+        for (const name of AVATAR_MEDIA) await putMediaFile(`auto-reel/avatar-tests/${t.id}-${name}`, avatarFile(t.id, name), typeOf(name));
+        await fs.rm(avatarFile(t.id, 'voice.mp3'), { force: true });
         t.status = 'completed';
         t.stage = undefined;
         return;
@@ -756,8 +780,8 @@ autoReelRouter.get('/avatar-test/:id', async (req, res) => {
 autoReelRouter.get('/avatar-test/:id/:name', async (req, res) => {
   const id = safeId(req.params.id);
   const name = String(req.params.name);
-  if (!id || !['video.mp4', 'raw.mp4', 'voice.wav', 'photo.jpg'].includes(name)) return res.status(404).end();
-  res.sendFile(avatarFile(id, name), error => { if (error && !res.headersSent) res.status(404).end(); });
+  if (!id || !AVATAR_MEDIA.includes(name)) return res.status(404).end();
+  sendFile(res, avatarFile(id, name), `auto-reel/avatar-tests/${id}-${name}`);
 });
 
 autoReelRouter.delete('/avatar-test/:id', async (req, res) => {
@@ -765,6 +789,7 @@ autoReelRouter.delete('/avatar-test/:id', async (req, res) => {
   if (!id || running.has(id)) return res.status(409).json({ success: false, error: 'التجربة قيد العمل' });
   const names = await fs.readdir(avatarDir()).catch(() => [] as string[]);
   await Promise.all(names.filter(n => n.startsWith(`${id}-`)).map(n => fs.rm(path.join(avatarDir(), n), { force: true })));
+  await removeMedia(...AVATAR_MEDIA.map(n => `auto-reel/avatar-tests/${id}-${n}`));
   res.json({ success: true });
 });
 

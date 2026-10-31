@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { openRouterStats } from './openrouter-stats.ts';
+import { putMedia, removeMedia, sendMedia, typeOf } from './storage.ts';
 
 const base = () => process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1';
 const key = () => process.env.OPENROUTER_API_KEY || '';
@@ -119,7 +120,8 @@ export interface ImageJob {
 
 const safeId = (id: unknown): string | null => (typeof id === 'string' && /^[a-f0-9]{16}$/.test(id) ? id : null);
 const metaFile = (id: string) => path.join(dir(), `${id}.json`);
-const imageFile = (id: string, index: number, ext: string) => path.join(dir(), `${id}-${index}.${ext}`);
+// Pictures are in the media storage (server/storage.ts); only the small job files stay on the server
+const imageKey = (id: string, index: number, ext: string) => `ai-image/${id}-${index}.${ext}`;
 
 async function readJob(id: string): Promise<ImageJob | null> {
   try { return JSON.parse(await fs.readFile(metaFile(id), 'utf8')); } catch { return null; }
@@ -198,7 +200,7 @@ async function run(job: ImageJob, editDataUrl: string | null) {
     });
     job.costUsd = result.costUsd;
     job.note = result.note;
-    for (const [i, p] of result.pictures.entries()) await fs.writeFile(imageFile(job.id, i, p.ext), p.bytes);
+    for (const [i, p] of result.pictures.entries()) await putMedia(imageKey(job.id, i, p.ext), p.bytes, typeOf(`x.${p.ext}`));
     job.ext = result.pictures[0].ext;
     job.files = result.pictures.length;
     job.status = 'completed';
@@ -261,9 +263,8 @@ aiImageRouter.get('/jobs/:id/file/:index', async (req, res) => {
   const job = id ? await readJob(id) : null;
   const index = Number(req.params.index);
   if (!id || !job?.ext || !Number.isInteger(index) || index < 0 || index >= job.files) return res.status(404).end();
-  res.set('Cache-Control', 'private, max-age=86400');
-  if (req.query.download) res.attachment(`ai-image-${id}-${index}.${job.ext}`);
-  res.sendFile(imageFile(id, index, job.ext), error => { if (error && !res.headersSent) res.status(404).end(); });
+  sendMedia(res, imageKey(id, index, job.ext), { type: typeOf(`x.${job.ext}`), download: req.query.download ? `ai-image-${id}-${index}.${job.ext}` : undefined, cache: 'private' })
+    .catch(() => res.status(404).end());
 });
 
 aiImageRouter.get('/library', async (_req, res) => {
@@ -277,7 +278,7 @@ aiImageRouter.delete('/jobs/:id', async (req, res) => {
   if (!id || !job) return res.status(404).json({ success: false, error: 'الصورة غير موجودة' });
   await Promise.all([
     fs.rm(metaFile(id), { force: true }),
-    ...Array.from({ length: job.files }, (_, i) => fs.rm(imageFile(id, i, job.ext || 'png'), { force: true })),
+    removeMedia(...Array.from({ length: job.files }, (_, i) => imageKey(id, i, job.ext || 'png'))),
   ]);
   res.json({ success: true });
 });

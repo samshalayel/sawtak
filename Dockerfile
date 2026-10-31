@@ -26,6 +26,7 @@ COPY --from=build /app/dist ./dist
 COPY server.ts tsconfig.json vite.config.ts index.html metadata.json ./
 COPY src ./src
 COPY server ./server
+COPY scripts/migrate-media-to-s3.ts ./scripts/
 # Arabic Google Fonts (OFL) for calm reels: installed system-wide so Pango (sharp) draws the captions with them
 # (libass mis-shapes many of these faces, see server/calm-text.ts) and libass finds Amiri for the day sticker
 COPY fonts ./fonts

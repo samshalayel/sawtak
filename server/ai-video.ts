@@ -7,6 +7,7 @@ import express from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import { openRouterStats } from './openrouter-stats.ts';
+import { putMediaFile, removeMedia, sendMedia } from './storage.ts';
 
 const base = () => process.env.OPENROUTER_API_BASE || 'https://openrouter.ai/api/v1';
 const key = () => process.env.OPENROUTER_API_KEY || '';
@@ -120,6 +121,8 @@ export interface VideoJob {
 const safeId = (id: unknown): string | null => (typeof id === 'string' && /^[A-Za-z0-9_-]{4,80}$/.test(id) ? id : null);
 const metaFile = (id: string) => path.join(dir(), `${id}.json`);
 const videoFile = (id: string) => path.join(dir(), `${id}.mp4`);
+// Finished clips are in the media storage (server/storage.ts); only the small job files stay on the server
+const videoKey = (id: string) => `ai-video/${id}.mp4`;
 const terminal = (s: VideoJob['status']) => s === 'completed' || s === 'failed' || s === 'cancelled' || s === 'expired';
 
 async function readJob(id: string): Promise<VideoJob | null> {
@@ -234,6 +237,7 @@ aiVideoRouter.get('/jobs/:id', async (req, res) => {
     if (!r.ok) throw new Error(`poll ${r.status}`);
     if (d.status === 'completed') {
       await saveVideo(id, d);
+      await putMediaFile(videoKey(id), videoFile(id), 'video/mp4');
       job.status = 'completed';
       job.file = true;
       const reported = Number(d.usage?.cost);
@@ -255,9 +259,8 @@ aiVideoRouter.get('/jobs/:id', async (req, res) => {
 aiVideoRouter.get('/jobs/:id/file', async (req, res) => {
   const id = safeId(req.params.id);
   if (!id) return res.status(404).end();
-  res.set('Cache-Control', 'private, max-age=3600');
-  if (req.query.download) res.attachment(`ai-scene-${id}.mp4`);
-  res.type('video/mp4').sendFile(videoFile(id), error => { if (error && !res.headersSent) res.status(404).end(); });
+  sendMedia(res, videoKey(id), { type: 'video/mp4', download: req.query.download ? `ai-scene-${id}.mp4` : undefined, cache: 'private' })
+    .catch(() => res.status(404).end());
 });
 
 aiVideoRouter.get('/library', async (_req, res) => {
@@ -268,7 +271,7 @@ aiVideoRouter.get('/library', async (_req, res) => {
 aiVideoRouter.delete('/jobs/:id', async (req, res) => {
   const id = safeId(req.params.id);
   if (!id || !(await readJob(id))) return res.status(404).json({ success: false, error: 'المقطع غير موجود' });
-  await Promise.all([fs.rm(metaFile(id), { force: true }), fs.rm(videoFile(id), { force: true })]);
+  await Promise.all([fs.rm(metaFile(id), { force: true }), removeMedia(videoKey(id))]);
   lastPoll.delete(id);
   res.json({ success: true });
 });
