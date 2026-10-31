@@ -171,7 +171,7 @@ remixRouter.get('/info/:itemId', (req, res) => {
   const found = itemRecipe(Number(req.params.itemId));
   if (!found) return res.status(404).json({ success: false, error: 'هذا العمل لا يمكن صنع مثله' });
   res.json({
-    success: true, available: serviceOn('remix'), boxes: boxes(found.recipe), price: pricePoints(found.recipe),
+    success: true, available: serviceOn('remix') && serviceOn('gallery'), boxes: boxes(found.recipe), price: pricePoints(found.recipe),
     summary: summary(found.recipe), balance: req.user ? balancePoints(req.user.id) : null, credits: req.user ? balanceCredits(req.user.id) : null,
   });
 });
@@ -179,7 +179,7 @@ remixRouter.get('/info/:itemId', (req, res) => {
 remixRouter.post('/:itemId', requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id;
-    if (!serviceOn('remix') && req.user!.role !== 'admin') return res.status(503).json({ success: false, error: 'هذه الخدمة متوقفة مؤقتاً' });
+    if ((!serviceOn('remix') || !serviceOn('gallery')) && req.user!.role !== 'admin') return res.status(503).json({ success: false, error: 'هذه الخدمة متوقفة مؤقتاً' });
     if (!key()) return res.status(503).json({ success: false, error: 'الخدمة غير متاحة حالياً' });
     const found = itemRecipe(Number(req.params.itemId));
     if (!found) return res.status(404).json({ success: false, error: 'هذا العمل لا يمكن صنع مثله' });

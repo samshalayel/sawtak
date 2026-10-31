@@ -212,6 +212,7 @@ export interface AppSettings {
   servicePayments: number;
   serviceMedical: number;
   serviceRemix: number;              // "make one like it" in the gallery
+  serviceGallery: number;            // the public gallery itself
   betaRibbon: number;                // 1 = "نسخة تجريبية" ribbon on every page
   reelLambda: number;                // calm/Quran reels on AWS Lambda: 0 = never, 1 = when this server is busy, 2 = always
   generationsPerMinute: number;      // per-user rate limit
@@ -255,6 +256,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   servicePayments: 1,
   serviceMedical: 1,
   serviceRemix: 1,
+  serviceGallery: 1,
   betaRibbon: 1,
   reelLambda: 0,
   contactWhatsapp: '',

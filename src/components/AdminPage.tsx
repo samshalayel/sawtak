@@ -136,6 +136,7 @@ interface AppSettings {
   servicePayments: number;
   serviceMedical: number;
   serviceRemix: number;
+  serviceGallery: number;
   betaRibbon: number;
   reelLambda: number;
 }
@@ -904,6 +905,7 @@ const SERVICE_SWITCHES: { key: keyof AppSettings; label: string; icon: string }[
   { key: 'servicePress', label: 'استوديو الصحفيين', icon: '📰' },
   { key: 'servicePayments', label: 'الدفع بجوال باي', icon: '💳' },
   { key: 'serviceMedical', label: 'البطاقات والريلز الطبية', icon: '🩺' },
+  { key: 'serviceGallery', label: 'معرض الأعمال', icon: '🖼️' },
   { key: 'serviceRemix', label: '«اصنع مثله» من المعرض', icon: '🪄' },
 ];
 

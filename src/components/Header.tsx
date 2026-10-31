@@ -26,6 +26,7 @@ interface HeaderProps {
   view: 'studio' | 'admin' | 'motion';
   /** False when the motion service is stopped (the link is hidden). */
   motionOn?: boolean;
+  galleryOn?: boolean;
   /** Admins only: browse the site as a customer sees it (stopped services hidden). */
   viewAsCustomer?: boolean;
   onToggleViewAsCustomer?: () => void;
@@ -41,6 +42,7 @@ export const Header: React.FC<HeaderProps> = ({
   onPackagesClick,
   view,
   motionOn = true,
+  galleryOn = true,
   viewAsCustomer = false,
   onToggleViewAsCustomer,
   cornerRibbon = false,
@@ -95,14 +97,14 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* The public gallery, for visitors too */}
-            <a
+            {galleryOn && <a
               href="#/gallery"
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
               title="معرض الأعمال"
             >
               <LayoutGrid className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">المعرض</span>
-            </a>
+            </a>}
 
             {user ? (
               <>

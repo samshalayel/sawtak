@@ -11,6 +11,7 @@ import { spawn } from 'child_process';
 import { db } from './db.ts';
 import { requireAuth } from './auth.ts';
 import { getMedia, putMedia, removeMedia, sendMedia } from './storage.ts';
+import { SERVICE_OFF_MESSAGE, serviceOn } from './services.ts';
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const MAX_UPLOAD = 60 * 1024 * 1024;
@@ -191,6 +192,12 @@ async function removeItem(row: ItemRow) {
 // ---------- Public: browse, and customers share their work ----------
 
 export const galleryRouter = express.Router();
+
+// Switched off in the admin settings: closed to visitors and customers (their own list stays), open to admins
+galleryRouter.use((req, res, next) => {
+  if (serviceOn('gallery') || req.user?.role === 'admin' || req.path.startsWith('/mine')) return next();
+  res.status(503).json({ success: false, code: 'SERVICE_DISABLED', service: 'gallery', error: SERVICE_OFF_MESSAGE });
+});
 
 galleryRouter.get('/meta', (_req, res) => {
   const counts = db.prepare("SELECT kind, COUNT(*) AS n FROM gallery_items WHERE status = 'approved' GROUP BY kind").all() as { kind: Kind; n: number }[];

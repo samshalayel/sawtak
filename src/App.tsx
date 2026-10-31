@@ -116,7 +116,7 @@ export default function App() {
   const [authPrompt, setAuthPrompt] = useState<{ mode: 'login' | 'register'; reason?: string } | null>(null);
   const [view, setView] = useState<View>(readView);
   // A page whose service an admin has stopped goes back to the home page (once the account and settings are known)
-  const viewStopped = (['press', 'greetings', 'calm', 'quran', 'motion', 'medical'] as const).some(v => view === v && !serviceOn(v));
+  const viewStopped = (['press', 'greetings', 'calm', 'quran', 'motion', 'medical', 'gallery'] as const).some(v => view === v && !serviceOn(v));
   useEffect(() => {
     if (authLoaded && viewStopped) window.location.hash = '#/';
   }, [authLoaded, viewStopped]);
@@ -700,6 +700,7 @@ export default function App() {
         user={user}
         view={isAdminView ? 'admin' : view === 'motion' ? 'motion' : 'studio'}
         motionOn={serviceOn('motion')}
+        galleryOn={serviceOn('gallery')}
         viewAsCustomer={user?.role === 'admin' && viewAsCustomer}
         onToggleViewAsCustomer={toggleViewAsCustomer}
         onLoginClick={() => setAuthPrompt({ mode: 'login' })}
@@ -836,8 +837,8 @@ export default function App() {
             title="آيات بصوت القارئ" text="اختر آيات كاملة بتلاوة قارئ حقيقي، فوق مشاهد طبيعة هادئة، جاهزة للمشاركة" />}
           {serviceOn('medical') && <HomeEntry href="#/medical" icon={Stethoscope} color="#0284c7" cta="ابدأ"
             title="بطاقات وريلز طبية" text="اكتب معلومتك الطبية، نراجعها ونبسّطها، وتنشرها ببطاقة أو ريل يحمل اسمك" />}
-          <HomeEntry href="#/gallery" icon={LayoutGrid} color="#d97706" cta="تصفّح"
-            title="معرض الأعمال" text="استمع وشاهد ما صنعه غيرك على صوتك الذكي، وشارك أعمالك أنت أيضاً" />
+          {serviceOn('gallery') && <HomeEntry href="#/gallery" icon={LayoutGrid} color="#d97706" cta="تصفّح"
+            title="معرض الأعمال" text="استمع وشاهد ما صنعه غيرك على صوتك الذكي، وشارك أعمالك أنت أيضاً" />}
         </div>
 
         {studioOn && (<>
