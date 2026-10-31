@@ -81,7 +81,7 @@ interface AvatarTest {
   costUsd?: number;
   error?: string;
 }
-interface PresenterModel { id: string; name: string; durations: number[] | null; usdPerSecond: number | null }
+interface PresenterModel { id: string; name: string; durations: number[] | null; usdPerSecond: number | null; audio?: boolean }
 
 const EDIT_IDEAS = [
   'wearing a black tailored suit and white shirt, standing in a modern TV studio with soft lights',
@@ -104,31 +104,32 @@ const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['
   const [active, setActive] = useState<AvatarTest | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadTests = useCallback(() => {
-    api<{ tests: AvatarTest[] }>('/api/admin/auto-reel/avatar-tests/all').then(d => setTests(d.tests)).catch(() => {});
-  }, []);
-  useEffect(() => {
+  const loadModels = useCallback(() => {
     api<{ models: PresenterModel[]; imageModels: { id: string; name: string }[]; defaultPrompt: string }>('/api/admin/auto-reel/avatar-models/all')
       .then(d => {
         setModels(d.models);
         setImageModels(d.imageModels);
         setPrompt(prev => prev || d.defaultPrompt);
-        setImageModel(d.imageModels.find(m => /gemini.*image|nano/i.test(m.id + m.name))?.id ?? d.imageModels[0]?.id ?? '');
+        setImageModel(prev => prev || (d.imageModels.find(m => /gemini.*image|nano/i.test(m.id + m.name))?.id ?? d.imageModels[0]?.id ?? ''));
       })
       .catch(e => setError(e.message));
-    loadTests();
-  }, [loadTests]);
+  }, []);
+  const loadTests = useCallback(() => {
+    api<{ tests: AvatarTest[] }>('/api/admin/auto-reel/avatar-tests/all').then(d => setTests(d.tests)).catch(() => {});
+  }, []);
+  useEffect(() => { loadModels(); loadTests(); }, [loadModels, loadTests]);
 
   useEffect(() => {
     if (!active || active.status !== 'working') return;
     const timer = setInterval(() => {
       api<{ test: AvatarTest }>(`/api/admin/auto-reel/avatar-test/${active.id}`).then(d => {
         setActive(d.test);
-        if (d.test.status !== 'working') loadTests();
+        // A finished trial teaches whether the model takes a voice: the list shows it
+        if (d.test.status !== 'working') { loadTests(); loadModels(); }
       }).catch(() => {});
     }, 5000);
     return () => clearInterval(timer);
-  }, [active, loadTests]);
+  }, [active, loadTests, loadModels]);
 
   // Sent as a JPEG of at most 1080 px on its longer side: enough for the avatar, and small enough to upload
   const pick = async (file: File | undefined) => {
@@ -185,7 +186,11 @@ const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['
         <label className="block">
           <span className={label}>نموذج الفيديو (سعر الثانية)</span>
           <select value={model} onChange={e => setModel(e.target.value)} className={field}>
-            {models.map(m => <option key={m.id} value={m.id}>{m.name}{m.usdPerSecond != null ? ` — $${+m.usdPerSecond.toFixed(3)}/ث` : ''}{m.durations ? '' : ' · بطول الصوت'}</option>)}
+            {models.map(m => (
+              <option key={m.id} value={m.id} disabled={m.audio === false}>
+                {m.audio === true ? '✓ ' : ''}{m.name}{m.usdPerSecond != null ? ` — $${+m.usdPerSecond.toFixed(3)}/ث` : ''}{m.durations ? '' : ' · بطول الصوت'}{m.audio === false ? ' · لا يقبل صوت' : m.audio === true ? ' · يقبل صوت' : ''}
+              </option>
+            ))}
           </select>
         </label>
         <label className="block">

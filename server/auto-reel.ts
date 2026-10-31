@@ -549,7 +549,24 @@ async function writeAvatar(t: AvatarTest) {
   await fs.writeFile(avatarFile(t.id, 'test.json'), JSON.stringify(t, null, 1));
 }
 
-interface PresenterModel { id: string; name: string; durations: number[] | null; resolutions: string[] | null; vertical: boolean; firstFrame: boolean; usdPerSecond: number | null }
+interface PresenterModel {
+  id: string; name: string; durations: number[] | null; resolutions: string[] | null; vertical: boolean; firstFrame: boolean; usdPerSecond: number | null;
+  audio?: boolean;          // learnt: true took a voice, false refused one (OpenRouter's list does not say)
+}
+
+// What each model did with a voice, learnt from the trials and kept across restarts
+const audioFile = () => path.join(avatarDir(), 'audio-support.json');
+// Already seen in the first trials
+const AUDIO_SEEN: Record<string, boolean> = { 'heygen/avatar-iv': true, 'x-ai/grok-imagine-video-1.5-lite': false };
+async function audioSupport(): Promise<Record<string, boolean>> {
+  try { return { ...AUDIO_SEEN, ...JSON.parse(await fs.readFile(audioFile(), 'utf8')) }; } catch { return { ...AUDIO_SEEN }; }
+}
+async function learnAudio(model: string, takes: boolean) {
+  const known = await audioSupport();
+  known[model] = takes;
+  await fs.mkdir(avatarDir(), { recursive: true });
+  await fs.writeFile(audioFile(), JSON.stringify(known, null, 1));
+}
 
 /** Every video model OpenRouter lists (avatar models included), with its lowest per-second price. */
 async function presenterModels(): Promise<PresenterModel[]> {
@@ -630,6 +647,7 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
       if (res.ok && typeof answer.id === 'string') {
         t.attempts.push({ shape, result: `accepted (${answer.id})` });
         t.shape = shape;
+        await learnAudio(model.id, true);
         t.videoId = answer.id;
         break;
       }
@@ -637,7 +655,10 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
       await save();
     }
     await save();
-    if (!t.videoId) throw new Error('رفض النموذج الطلب (غالباً لا يقبل صوتاً)، راجع السجل');
+    if (!t.videoId) {
+      if (t.attempts.some(a => /audio input references|audio_url|audio reference/i.test(a.result) && /not|unsupported|does not/i.test(a.result))) await learnAudio(model.id, false);
+      throw new Error('رفض النموذج الطلب (غالباً لا يقبل صوتاً)، راجع السجل');
+    }
 
     const started = Date.now();
     while (Date.now() - started < CLIP_WAIT_MS) {
@@ -671,7 +692,10 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
 
 autoReelRouter.get('/avatar-models/all', async (_req, res) => {
   try {
-    const [models, images] = await Promise.all([presenterModels(), imageModels()]);
+    const [list, images, known] = await Promise.all([presenterModels(), imageModels(), audioSupport()]);
+    const models = list.map(m => ({ ...m, audio: known[m.id] }))
+      // Models known to take a voice first
+      .sort((a, b) => Number(b.audio === true) - Number(a.audio === true));
     res.json({
       success: true, models, defaultPrompt: DEFAULT_MOTION,
       // Models that redraw a photo from a reference (for clothes / pose / place)
@@ -700,6 +724,8 @@ autoReelRouter.post('/avatar-test', async (req, res) => {
   const voice = knownVoice(b.voice) ? b.voice : VOICES[0].id;
   const model = (await presenterModels().catch(() => [])).find(m => m.id === (b.model || 'heygen/avatar-iv'));
   if (!model) return res.status(400).json({ success: false, error: 'النموذج غير موجود' });
+  // Known not to take a voice: refused before anything is spent on the photo
+  if ((await audioSupport())[model.id] === false) return res.status(400).json({ success: false, error: 'هذا النموذج لا يقبل صوتاً (جُرّب سابقاً)، اختر غيره' });
   const editPrompt = String(b.editPrompt || '').trim().slice(0, 600) || undefined;
   const imageModel = editPrompt ? String(b.imageModel || '') : undefined;
   if (editPrompt && !(await imageModels()).some(m => m.id === imageModel && m.editsImages)) return res.status(400).json({ success: false, error: 'اختر نموذج صور يعدّل الصور' });
