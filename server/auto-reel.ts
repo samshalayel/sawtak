@@ -10,7 +10,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { generatePicture, imageModels } from './ai-image.ts';
-import { saveVideo, videoModels } from './ai-video.ts';
+import { perSecond, saveVideo, videoModels } from './ai-video.ts';
 import { openRouterStats } from './openrouter-stats.ts';
 import { ARABIC_FONT, assText, assTime, captionChunks, runFfmpeg, speechIntervals } from './video.ts';
 import { VOICES } from '../src/data/presets.ts';
@@ -509,20 +509,29 @@ autoReelRouter.delete('/:id', async (req, res) => {
   res.json({ success: true });
 });
 
-// ---------- Trial: a talking presenter (HeyGen Avatar IV) ----------
-// One photo and one short sentence in the studio's voice, lip-synced by an avatar model. How OpenRouter takes the
-// sound is not documented yet, so the known request shapes are tried in turn (a refused request costs nothing) and
-// every answer is kept, to learn which one works before building presenter scenes into the reels.
+// ---------- Trial: a talking presenter ----------
+// One photo and one short sentence in the studio's voice (or a voice fingerprint), lip-synced by a video model the
+// admin picks. The photo can first be redrawn by an image model (other clothes, pose, place) keeping the face, and the
+// motion is the admin's own prompt. OpenRouter takes the sound only as an https audio_url, so the voice is offered at a
+// temporary public link. Models that cannot take sound refuse the request, which costs nothing; every answer is kept.
 
-const AVATAR_MODEL = () => process.env.AUTO_REEL_AVATAR_MODEL || 'heygen/avatar-iv';
 const avatarDir = () => path.join(root(), 'avatar-tests');
+const DEFAULT_MOTION = 'The person speaks naturally to the camera with natural expressions, subtle head movement and light hand gestures.';
 
 interface AvatarTest {
   id: string;
   createdAt: string;
   text: string;
   voice: string;
+  model: string;
+  modelName: string;
+  prompt: string;           // motion and scene
+  editPrompt?: string;      // how the photo was redrawn first
+  imageModel?: string;
+  duration?: number;        // asked for, on models with fixed lengths
+  estimateUsd?: number;
   status: 'working' | 'completed' | 'failed';
+  stage?: string;
   attempts: { shape: string; result: string }[];
   shape?: string;           // the request shape that was accepted
   videoId?: string;
@@ -540,20 +549,75 @@ async function writeAvatar(t: AvatarTest) {
   await fs.writeFile(avatarFile(t.id, 'test.json'), JSON.stringify(t, null, 1));
 }
 
-async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: string) {
+interface PresenterModel { id: string; name: string; durations: number[] | null; resolutions: string[] | null; vertical: boolean; firstFrame: boolean; usdPerSecond: number | null }
+
+/** Every video model OpenRouter lists (avatar models included), with its lowest per-second price. */
+async function presenterModels(): Promise<PresenterModel[]> {
+  const res = await fetch(`${base()}/videos/models`, { headers: { Authorization: `Bearer ${key()}` }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
+  const list: any[] = (await res.json())?.data ?? [];
+  return list
+    // Editing and upscaling work on a video, not a photo
+    .filter(m => !/edit|upscale/i.test(m.id) && (!Array.isArray(m.supported_aspect_ratios) || m.supported_aspect_ratios.includes('9:16')))
+    .map(m => {
+      const skus: Record<string, string> = m.pricing_skus ?? {};
+      const resolutions: string[] | null = Array.isArray(m.supported_resolutions) ? m.supported_resolutions : null;
+      const prices = (resolutions ?? ['']).map(r => perSecond(skus, r, false, true)).filter((p): p is number => p !== null);
+      return {
+        id: String(m.id), name: String(m.name || m.id).replace(/^[^:]+:\s*/, ''),
+        durations: Array.isArray(m.supported_durations) ? m.supported_durations : null, resolutions,
+        vertical: Array.isArray(m.supported_aspect_ratios), firstFrame: Array.isArray(m.supported_frame_images) && m.supported_frame_images.includes('first_frame'),
+        usdPerSecond: prices.length ? Math.min(...prices) : null,
+      };
+    })
+    .sort((a, b) => (a.usdPerSecond ?? Infinity) - (b.usdPerSecond ?? Infinity));
+}
+
+async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: string, model: PresenterModel) {
+  const save = () => writeAvatar(t).catch(() => {});
   try {
+    t.stage = 'الصوت';
+    await save();
     const wav = await say(t.text, t.voice, 'Natural, friendly presenter explaining to the camera');
     if (!wav) throw new Error('لم يرجع صوت');
     await fs.writeFile(avatarFile(t.id, 'voice.wav'), wav);
     t.seconds = Math.round(speechIntervals(wav).duration * 100) / 100;
+    // Fixed-length models: the shortest length that covers the real voice
+    if (model.durations) t.duration = [...model.durations].sort((x, y) => x - y).find(d => d >= t.seconds! + 0.3) ?? Math.max(...model.durations);
     await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', `${t.id}-voice.wav`, '-c:a', 'libmp3lame', '-b:a', '128k', `${t.id}-voice.mp3`], avatarDir(), { timeoutMs: 60_000, duration: 0 });
-    const mp3 = `data:audio/mpeg;base64,${(await fs.readFile(avatarFile(t.id, 'voice.mp3'))).toString('base64')}`;
-    const photo = { type: 'image_url', image_url: { url: photoDataUrl } };
-    const common = { model: AVATAR_MODEL(), prompt: 'The person speaks naturally to the camera, with subtle head movement and natural expressions.', resolution: '720p', aspect_ratio: '9:16' };
-    // OpenRouter takes the sound as an audio_url reference (learnt from its refusals); inline first, then a public link
+
+    // The photo, redrawn first if asked (same face, other clothes / pose / place)
+    let photoUrl = photoDataUrl;
+    if (t.editPrompt && t.imageModel) {
+      t.stage = 'تعديل الصورة';
+      await save();
+      const edit = await generatePicture({
+        model: t.imageModel, aspectRatio: '9:16', references: [photoDataUrl],
+        prompt: `Keep exactly the same person and face as in the reference photo. ${t.editPrompt}. Vertical portrait framing, the person facing the camera, mouth closed, photorealistic.`,
+      });
+      t.costUsd = (t.costUsd ?? 0) + (edit.costUsd ?? 0);
+      await fs.writeFile(avatarFile(t.id, 'edit-raw'), edit.pictures[0].bytes);
+      await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', `${t.id}-edit-raw`, '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease', '-q:v', '3', `${t.id}-photo.jpg`],
+        avatarDir(), { timeoutMs: 60_000, duration: 0 });
+      await fs.rm(avatarFile(t.id, 'edit-raw'), { force: true });
+      photoUrl = `data:image/jpeg;base64,${(await fs.readFile(avatarFile(t.id, 'photo.jpg'))).toString('base64')}`;
+    } else {
+      await fs.writeFile(avatarFile(t.id, 'photo.jpg'), Buffer.from(photoDataUrl.split(',')[1], 'base64'));
+    }
+
+    t.stage = 'تحريك الصورة';
+    await save();
+    const photo = { type: 'image_url', image_url: { url: photoUrl } };
+    const audio = { type: 'audio_url', audio_url: { url: `${publicBase}/api/avatar-audio/${t.id}.mp3` } };
+    const common = {
+      model: model.id, prompt: t.prompt,
+      ...(model.resolutions ? { resolution: model.resolutions[0] } : {}),
+      ...(model.vertical ? { aspect_ratio: '9:16' } : {}),
+      ...(t.duration ? { duration: t.duration } : {}),
+    };
     const shapes: [string, Record<string, unknown>][] = [
-      ['audio_url (inline data URL)', { input_references: [photo, { type: 'audio_url', audio_url: { url: mp3 } }] }],
-      ['audio_url (public link)', { input_references: [photo, { type: 'audio_url', audio_url: { url: `${publicBase}/api/avatar-audio/${t.id}.mp3` } }] }],
+      ['photo + audio as references', { input_references: [photo, audio] }],
+      ...(model.firstFrame ? [['photo as first frame + audio reference', { frame_images: [{ ...photo, frame_type: 'first_frame' }], input_references: [audio] }]] as [string, Record<string, unknown>][] : []),
     ];
     for (const [shape, extra] of shapes) {
       const res = await fetch(`${base()}/videos`, {
@@ -570,10 +634,10 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
         break;
       }
       t.attempts.push({ shape, result: `${res.status}: ${String(answer?.error?.message || JSON.stringify(answer)).slice(0, 300)}` });
-      await writeAvatar(t);
+      await save();
     }
-    await writeAvatar(t);
-    if (!t.videoId) throw new Error('رُفضت كل أشكال الطلب، راجع السجل');
+    await save();
+    if (!t.videoId) throw new Error('رفض النموذج الطلب (غالباً لا يقبل صوتاً)، راجع السجل');
 
     const started = Date.now();
     while (Date.now() - started < CLIP_WAIT_MS) {
@@ -582,10 +646,15 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
       const d: any = r?.ok ? await r.json().catch(() => null) : null;
       if (!d) continue;
       if (d.status === 'completed') {
-        await saveVideo(t.videoId, d, avatarFile(t.id, 'video.mp4'));
+        await saveVideo(t.videoId, d, avatarFile(t.id, 'raw.mp4'));
         const cost = Number(d.usage?.cost);
-        t.costUsd = Number.isFinite(cost) && cost > 0 ? cost : undefined;
+        if (Number.isFinite(cost) && cost > 0) t.costUsd = (t.costUsd ?? 0) + cost;
+        else if (t.estimateUsd) t.costUsd = (t.costUsd ?? 0) + t.estimateUsd;
+        // Our own voice on the picture, whatever sound the model put there
+        await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', `${t.id}-raw.mp4`, '-i', `${t.id}-voice.wav`, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', `${t.id}-video.mp4`],
+          avatarDir(), { timeoutMs: 120_000, duration: 0 });
         t.status = 'completed';
+        t.stage = undefined;
         return;
       }
       if (['failed', 'cancelled', 'expired'].includes(d.status)) throw new Error(`فشل التوليد: ${String(d.error?.message || d.error || d.status).slice(0, 300)}`);
@@ -596,21 +665,58 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: st
     t.error = String(error?.message || error).slice(0, 400);
   } finally {
     running.delete(t.id);
-    await writeAvatar(t).catch(() => {});
+    await save();
   }
 }
 
+autoReelRouter.get('/avatar-models/all', async (_req, res) => {
+  try {
+    const [models, images] = await Promise.all([presenterModels(), imageModels()]);
+    res.json({
+      success: true, models, defaultPrompt: DEFAULT_MOTION,
+      // Models that redraw a photo from a reference (for clothes / pose / place)
+      imageModels: images.filter(m => m.editsImages).map(m => ({ id: m.id, name: m.name })),
+    });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: 'تعذّر جلب النماذج من OpenRouter' });
+  }
+});
+
+autoReelRouter.get('/avatar-tests/all', async (_req, res) => {
+  const names = await fs.readdir(avatarDir()).catch(() => [] as string[]);
+  const tests = (await Promise.all(names.filter(n => n.endsWith('-test.json')).map(n => readAvatar(n.slice(0, 16)))))
+    .filter((t): t is AvatarTest => Boolean(t)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40)
+    .map(t => (t.status === 'working' && !running.has(t.id) ? { ...t, status: 'failed' as const, error: 'توقف الخادم أثناء العمل' } : t));
+  res.json({ success: true, tests });
+});
+
 autoReelRouter.post('/avatar-test', async (req, res) => {
   if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
-  const photo = String(req.body?.imageDataUrl || '');
+  const b = req.body ?? {};
+  const photo = String(b.imageDataUrl || '');
   if (!/^data:image\/(png|jpe?g|webp);base64,/.test(photo) || photo.length > 6_000_000) return res.status(400).json({ success: false, error: 'ارفع صورة (PNG أو JPG، أقل من 4 ميغابايت)' });
-  const text = String(req.body?.text || '').trim().slice(0, 200);
+  const text = String(b.text || '').trim().slice(0, 300);
   if (text.length < 5) return res.status(400).json({ success: false, error: 'اكتب جملة قصيرة' });
-  const voice = knownVoice(req.body?.voice) ? req.body.voice : VOICES[0].id;
-  const t: AvatarTest = { id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), text, voice, status: 'working', attempts: [] };
+  const voice = knownVoice(b.voice) ? b.voice : VOICES[0].id;
+  const model = (await presenterModels().catch(() => [])).find(m => m.id === (b.model || 'heygen/avatar-iv'));
+  if (!model) return res.status(400).json({ success: false, error: 'النموذج غير موجود' });
+  const editPrompt = String(b.editPrompt || '').trim().slice(0, 600) || undefined;
+  const imageModel = editPrompt ? String(b.imageModel || '') : undefined;
+  if (editPrompt && !(await imageModels()).some(m => m.id === imageModel && m.editsImages)) return res.status(400).json({ success: false, error: 'اختر نموذج صور يعدّل الصور' });
+  // Fixed-length models get the length that covers ~15 words a 5 s; the real voice length decides when it is known
+  const words = text.split(/\s+/).length;
+  const guess = Math.max(3, words / 2.2);
+  const duration = model.durations ? ([...model.durations].sort((x, y) => x - y).find(d => d >= guess + 0.5) ?? Math.max(...model.durations)) : undefined;
+  const estimateUsd = model.usdPerSecond != null ? Math.round(model.usdPerSecond * (duration ?? guess) * 100) / 100 : undefined;
+  if ((estimateUsd ?? 0) > 3) return res.status(400).json({ success: false, error: `التكلفة المقدّرة $${estimateUsd} عالية للتجربة، قصّر الجملة` });
+  const t: AvatarTest = {
+    id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), text, voice,
+    model: model.id, modelName: model.name, prompt: String(b.prompt || '').trim().slice(0, 1500) || DEFAULT_MOTION,
+    editPrompt, imageModel, duration, estimateUsd, status: 'working', attempts: [],
+  };
   await writeAvatar(t);
   running.add(t.id);
-  runAvatarTest(t, photo, `${req.protocol}://${req.get('host')}`);
+  runAvatarTest(t, photo, `${req.protocol}://${req.get('host')}`, model);
   res.json({ success: true, test: t });
 });
 
@@ -624,8 +730,16 @@ autoReelRouter.get('/avatar-test/:id', async (req, res) => {
 autoReelRouter.get('/avatar-test/:id/:name', async (req, res) => {
   const id = safeId(req.params.id);
   const name = String(req.params.name);
-  if (!id || !['video.mp4', 'voice.wav'].includes(name)) return res.status(404).end();
+  if (!id || !['video.mp4', 'raw.mp4', 'voice.wav', 'photo.jpg'].includes(name)) return res.status(404).end();
   res.sendFile(avatarFile(id, name), error => { if (error && !res.headersSent) res.status(404).end(); });
+});
+
+autoReelRouter.delete('/avatar-test/:id', async (req, res) => {
+  const id = safeId(req.params.id);
+  if (!id || running.has(id)) return res.status(409).json({ success: false, error: 'التجربة قيد العمل' });
+  const names = await fs.readdir(avatarDir()).catch(() => [] as string[]);
+  await Promise.all(names.filter(n => n.startsWith(`${id}-`)).map(n => fs.rm(path.join(avatarDir(), n), { force: true })));
+  res.json({ success: true });
 });
 
 /**

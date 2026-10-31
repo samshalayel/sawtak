@@ -66,30 +66,69 @@ const IDEAS = [
 
 interface AvatarTest {
   id: string;
+  createdAt: string;
   text: string;
+  model: string;
+  modelName: string;
+  prompt: string;
+  editPrompt?: string;
   status: 'working' | 'completed' | 'failed';
+  stage?: string;
   attempts: { shape: string; result: string }[];
-  shape?: string;
   seconds?: number;
+  duration?: number;
+  estimateUsd?: number;
   costUsd?: number;
   error?: string;
 }
+interface PresenterModel { id: string; name: string; durations: number[] | null; usdPerSecond: number | null }
 
-/** Trial of a talking presenter: a photo and one sentence in the studio's voice, lip-synced by an avatar model. */
+const EDIT_IDEAS = [
+  'wearing a black tailored suit and white shirt, standing in a modern TV studio with soft lights',
+  'wearing a casual beige sweater, sitting on a sofa in a cozy living room, warm daylight',
+  'wearing a white doctor coat, standing in a bright clinic, holding a tablet',
+];
+
+/** Trial of a talking presenter: a photo (optionally redrawn first) and one sentence, lip-synced by the chosen model. */
 const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['customVoices'] }> = ({ voices, customVoices }) => {
+  const [models, setModels] = useState<PresenterModel[]>([]);
+  const [imageModels, setImageModels] = useState<{ id: string; name: string }[]>([]);
+  const [model, setModel] = useState('heygen/avatar-iv');
   const [photo, setPhoto] = useState<string | null>(null);
   const [text, setText] = useState('أهلاً بكم، اليوم رح نشرح لكم فكرة بسيطة بدقيقة وحدة.');
-  const [voice, setVoice] = useState(voices[0]?.id ?? '');
-  const [test, setTest] = useState<AvatarTest | null>(null);
+  const [voice, setVoice] = useState(customVoices[0]?.id ?? voices[0]?.id ?? '');
+  const [prompt, setPrompt] = useState('');
+  const [editPrompt, setEditPrompt] = useState('');
+  const [imageModel, setImageModel] = useState('');
+  const [tests, setTests] = useState<AvatarTest[]>([]);
+  const [active, setActive] = useState<AvatarTest | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const loadTests = useCallback(() => {
+    api<{ tests: AvatarTest[] }>('/api/admin/auto-reel/avatar-tests/all').then(d => setTests(d.tests)).catch(() => {});
+  }, []);
   useEffect(() => {
-    if (!test || test.status !== 'working') return;
+    api<{ models: PresenterModel[]; imageModels: { id: string; name: string }[]; defaultPrompt: string }>('/api/admin/auto-reel/avatar-models/all')
+      .then(d => {
+        setModels(d.models);
+        setImageModels(d.imageModels);
+        setPrompt(prev => prev || d.defaultPrompt);
+        setImageModel(d.imageModels.find(m => /gemini.*image|nano/i.test(m.id + m.name))?.id ?? d.imageModels[0]?.id ?? '');
+      })
+      .catch(e => setError(e.message));
+    loadTests();
+  }, [loadTests]);
+
+  useEffect(() => {
+    if (!active || active.status !== 'working') return;
     const timer = setInterval(() => {
-      api<{ test: AvatarTest }>(`/api/admin/auto-reel/avatar-test/${test.id}`).then(d => setTest(d.test)).catch(() => {});
+      api<{ test: AvatarTest }>(`/api/admin/auto-reel/avatar-test/${active.id}`).then(d => {
+        setActive(d.test);
+        if (d.test.status !== 'working') loadTests();
+      }).catch(() => {});
     }, 5000);
     return () => clearInterval(timer);
-  }, [test]);
+  }, [active, loadTests]);
 
   // Sent as a JPEG of at most 1080 px on its longer side: enough for the avatar, and small enough to upload
   const pick = async (file: File | undefined) => {
@@ -108,29 +147,49 @@ const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['
     }
   };
 
+  const chosen = models.find(m => m.id === model);
   const start = async () => {
-    if (!window.confirm('تجربة واحدة بحوالي 5 ثوانٍ ≈ $0.25 من رصيد OpenRouter. نبدأ؟')) return;
+    const price = chosen?.usdPerSecond != null ? ` (حوالي $${+chosen.usdPerSecond.toFixed(3)} للثانية)` : '';
+    if (!window.confirm(`تجربة بنموذج ${chosen?.name ?? model}${price}${editPrompt.trim() ? ' مع تعديل الصورة أولاً' : ''}. نبدأ؟`)) return;
     setError(null);
     try {
-      const d = await api<{ test: AvatarTest }>('/api/admin/auto-reel/avatar-test', { method: 'POST', body: JSON.stringify({ imageDataUrl: photo, text, voice }) });
-      setTest(d.test);
+      const d = await api<{ test: AvatarTest }>('/api/admin/auto-reel/avatar-test', {
+        method: 'POST',
+        body: JSON.stringify({ imageDataUrl: photo, text, voice, model, prompt, editPrompt: editPrompt.trim() || undefined, imageModel }),
+      });
+      setActive(d.test);
+      loadTests();
     } catch (e: any) {
       setError(e.message);
     }
   };
 
+  const remove = async (id: string) => {
+    if (!window.confirm('حذف هذه التجربة؟')) return;
+    await api(`/api/admin/auto-reel/avatar-test/${id}`, { method: 'DELETE' }).catch(e => setError(e.message));
+    if (active?.id === id) setActive(null);
+    loadTests();
+  };
+
   const field = 'mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500';
+  const label = 'text-xs font-semibold text-slate-300';
+  const file = (t: AvatarTest, name: string) => `/api/admin/auto-reel/avatar-test/${t.id}/${name}`;
   return (
     <div className={`${card} space-y-3`}>
-      <div className="text-sm font-bold text-white">تجربة المقدّم المتحدث (HeyGen Avatar IV · $0.05/ث)</div>
-      <div className="text-[11px] text-slate-400">صورة شخص من الصدر لفوق، وجهه واضح ومواجه للكاميرا (بموافقته). يُولَّد الصوت بأصواتنا ثم تتحرك الصورة وتتكلم به.</div>
-      <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+      <div className="text-sm font-bold text-white">تجربة المقدّم المتحدث</div>
+      <div className="text-[11px] text-slate-400">
+        صورة شخص (بموافقته)، تُعدَّل أولاً إن أردت (اللبس، الوقفة، المكان) ثم يحرّكها النموذج الذي تختاره ويُنطقها بالصوت. النموذج الذي لا يقبل صوتاً يرفض الطلب بدون تكلفة.
+      </div>
+
+      <div className="grid sm:grid-cols-[2fr_1fr] gap-2">
         <label className="block">
-          <span className="text-xs font-semibold text-slate-300">الجملة (قصيرة، أقل من 200 حرف)</span>
-          <input value={text} onChange={e => setText(e.target.value.slice(0, 200))} className={field} />
+          <span className={label}>نموذج الفيديو (سعر الثانية)</span>
+          <select value={model} onChange={e => setModel(e.target.value)} className={field}>
+            {models.map(m => <option key={m.id} value={m.id}>{m.name}{m.usdPerSecond != null ? ` — $${+m.usdPerSecond.toFixed(3)}/ث` : ''}{m.durations ? '' : ' · بطول الصوت'}</option>)}
+          </select>
         </label>
         <label className="block">
-          <span className="text-xs font-semibold text-slate-300">الصوت</span>
+          <span className={label}>الصوت</span>
           <select value={voice} onChange={e => setVoice(e.target.value)} className={field}>
             {customVoices.length > 0 && (
               <optgroup label="أصواتي (البصمة الصوتية)">
@@ -143,30 +202,90 @@ const AvatarTrial: React.FC<{ voices: Options['voices']; customVoices: Options['
           </select>
         </label>
       </div>
-      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => pick(e.target.files?.[0])} className="block text-xs text-slate-300" />
-      {photo && <img src={photo} alt="" className="h-28 rounded-lg border border-slate-700" />}
+
+      <label className="block">
+        <span className={label}>ما يقوله (قصير)</span>
+        <input value={text} onChange={e => setText(e.target.value.slice(0, 300))} className={field} />
+      </label>
+
+      <label className="block">
+        <span className={label}>الحركة والمشهد (بالإنجليزي أفضل)</span>
+        <textarea value={prompt} onChange={e => setPrompt(e.target.value.slice(0, 1500))} rows={2} className={field} dir="ltr" />
+      </label>
+
+      <div className="space-y-1">
+        <span className={label}>الصورة</span>
+        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => pick(e.target.files?.[0])} className="block text-xs text-slate-300" />
+        {photo && <img src={photo} alt="" className="h-28 rounded-lg border border-slate-700" />}
+      </div>
+
+      <div className="grid sm:grid-cols-[2fr_1fr] gap-2">
+        <label className="block">
+          <span className={label}>تعديل الصورة قبل التحريك (اختياري): اللبس، الوقفة، المكان</span>
+          <textarea value={editPrompt} onChange={e => setEditPrompt(e.target.value.slice(0, 600))} rows={2} placeholder="wearing a black suit, standing in a TV studio…" className={field} dir="ltr" />
+          <span className="mt-1 flex flex-wrap gap-1.5">
+            {EDIT_IDEAS.map((idea, i) => (
+              <button key={i} type="button" onClick={() => setEditPrompt(idea)} className="text-[11px] px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white">
+                {['بدلة واستوديو', 'كاجوال بالبيت', 'طبيب'][i]}
+              </button>
+            ))}
+          </span>
+        </label>
+        {editPrompt.trim() && (
+          <label className="block">
+            <span className={label}>نموذج تعديل الصورة</span>
+            <select value={imageModel} onChange={e => setImageModel(e.target.value)} className={field}>
+              {imageModels.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+
       <button
         type="button"
         onClick={start}
-        disabled={!photo || text.trim().length < 5 || test?.status === 'working'}
+        disabled={!photo || text.trim().length < 5 || active?.status === 'working'}
         className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-bold disabled:opacity-50"
       >
-        {test?.status === 'working' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} جرّب المقدّم
+        {active?.status === 'working' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} جرّب المقدّم
       </button>
       {error && <div className="text-xs text-rose-300">{error}</div>}
-      {test && (
-        <div className="space-y-2">
+
+      {active && (
+        <div className="space-y-2 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
           <div className="text-xs text-slate-300">
-            {test.status === 'working' ? 'قيد العمل… (دقيقة إلى بضع دقائق)' : test.status === 'completed' ? 'جاهز' : 'فشل'}
-            {test.seconds ? ` · ${test.seconds} ث صوت` : ''}{test.costUsd ? ` · ${usd(test.costUsd)}` : ''}
+            {active.status === 'working' ? `قيد العمل: ${active.stage ?? '…'}` : active.status === 'completed' ? 'جاهز' : 'فشل'}
+            {' · '}{active.modelName}{active.seconds ? ` · ${active.seconds} ث` : ''}{active.costUsd ? ` · ${usd(active.costUsd)}` : ''}
           </div>
-          {test.error && <div className="text-xs text-rose-300">{test.error}</div>}
-          {test.status === 'completed' && <video src={`/api/admin/auto-reel/avatar-test/${test.id}/video.mp4`} controls autoPlay playsInline className="max-h-[60vh] rounded-xl bg-black" />}
-          {test.attempts.length > 0 && (
-            <div className="text-[11px] text-slate-400 bg-slate-950/50 border border-slate-800 rounded-lg p-2 space-y-1" dir="ltr">
-              {test.attempts.map((a, i) => <div key={i}><b className="text-slate-300">{a.shape}</b> → {a.result}</div>)}
+          {active.error && <div className="text-xs text-rose-300">{active.error}</div>}
+          {active.status === 'completed' && <video src={file(active, 'video.mp4')} controls autoPlay playsInline className="max-h-[60vh] rounded-xl bg-black" />}
+          {active.attempts.length > 0 && (
+            <div className="text-[11px] text-slate-400 space-y-1" dir="ltr">
+              {active.attempts.map((a, i) => <div key={i}><b className="text-slate-300">{a.shape}</b> → {a.result}</div>)}
             </div>
           )}
+        </div>
+      )}
+
+      {tests.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-bold text-white">التجارب السابقة (للمقارنة)</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {tests.map(t => (
+              <div key={t.id} className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 space-y-1">
+                {t.status === 'completed' ? (
+                  <video src={file(t, 'video.mp4')} controls playsInline preload="none" poster={file(t, 'photo.jpg')} className="w-full rounded-lg bg-black aspect-[9/16] object-cover" />
+                ) : (
+                  <button type="button" onClick={() => setActive(t)} className="w-full aspect-[9/16] rounded-lg bg-slate-900 text-[11px] text-slate-400 px-2">
+                    {t.status === 'working' ? 'قيد العمل…' : `فشل: ${t.error ?? ''}`}
+                  </button>
+                )}
+                <div className="text-[11px] text-slate-200">{t.modelName}{t.costUsd ? ` · ${usd(t.costUsd)}` : ''}</div>
+                <div className="text-[10px] text-slate-500 line-clamp-2" dir="ltr">{t.editPrompt ? `[${t.editPrompt}] ` : ''}{t.prompt}</div>
+                <button type="button" onClick={() => remove(t.id)} className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-rose-300"><Trash2 className="w-3 h-3" /> حذف</button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
