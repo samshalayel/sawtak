@@ -62,7 +62,7 @@ app.set('trust proxy', 1);
 const smallJson = express.json({ limit: '1mb' });
 const largeJson = express.json({ limit: '30mb' });
 const LARGE_BODY_PATHS = new Set([
-  '/api/video/render', '/api/admin/custom-voices', '/api/admin/ai-video/generate', '/api/admin/ai-image/generate', '/api/greetings/batch', '/api/brand', '/api/press/master', '/api/press/video',
+  '/api/video/render', '/api/admin/custom-voices', '/api/admin/ai-video/generate', '/api/admin/ai-image/generate', '/api/admin/auto-reel/avatar-test', '/api/greetings/batch', '/api/brand', '/api/press/master', '/api/press/video',
   '/api/medical/profile',
 ]);
 app.use((req, res, next) => (LARGE_BODY_PATHS.has(req.path) ? largeJson : smallJson)(req, res, next));

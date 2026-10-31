@@ -90,12 +90,21 @@ const AvatarTrial: React.FC<{ voices: Options['voices'] }> = ({ voices }) => {
     return () => clearInterval(timer);
   }, [test]);
 
-  const pick = (file: File | undefined) => {
+  // Sent as a JPEG of at most 1080 px on its longer side: enough for the avatar, and small enough to upload
+  const pick = async (file: File | undefined) => {
+    setError(null);
     if (!file) return setPhoto(null);
-    if (file.size > 4 * 1024 * 1024) return setError('الصورة أكبر من 4 ميغابايت');
-    const reader = new FileReader();
-    reader.onload = () => setPhoto(String(reader.result));
-    reader.readAsDataURL(file);
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1080 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      setPhoto(canvas.toDataURL('image/jpeg', 0.9));
+    } catch {
+      setError('تعذّرت قراءة الصورة');
+    }
   };
 
   const start = async () => {
