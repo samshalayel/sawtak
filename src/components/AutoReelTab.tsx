@@ -63,6 +63,99 @@ const IDEAS = [
   'ريل عن جمال فلسطين: الزيتون، البحر، الأسواق القديمة، وغروب الشمس',
 ];
 
+interface AvatarTest {
+  id: string;
+  text: string;
+  status: 'working' | 'completed' | 'failed';
+  attempts: { shape: string; result: string }[];
+  shape?: string;
+  seconds?: number;
+  costUsd?: number;
+  error?: string;
+}
+
+/** Trial of a talking presenter: a photo and one sentence in the studio's voice, lip-synced by an avatar model. */
+const AvatarTrial: React.FC<{ voices: Options['voices'] }> = ({ voices }) => {
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [text, setText] = useState('أهلاً بكم، اليوم رح نشرح لكم فكرة بسيطة بدقيقة وحدة.');
+  const [voice, setVoice] = useState(voices[0]?.id ?? '');
+  const [test, setTest] = useState<AvatarTest | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!test || test.status !== 'working') return;
+    const timer = setInterval(() => {
+      api<{ test: AvatarTest }>(`/api/admin/auto-reel/avatar-test/${test.id}`).then(d => setTest(d.test)).catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [test]);
+
+  const pick = (file: File | undefined) => {
+    if (!file) return setPhoto(null);
+    if (file.size > 4 * 1024 * 1024) return setError('الصورة أكبر من 4 ميغابايت');
+    const reader = new FileReader();
+    reader.onload = () => setPhoto(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const start = async () => {
+    if (!window.confirm('تجربة واحدة بحوالي 5 ثوانٍ ≈ $0.25 من رصيد OpenRouter. نبدأ؟')) return;
+    setError(null);
+    try {
+      const d = await api<{ test: AvatarTest }>('/api/admin/auto-reel/avatar-test', { method: 'POST', body: JSON.stringify({ imageDataUrl: photo, text, voice }) });
+      setTest(d.test);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const field = 'mt-1 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-amber-500';
+  return (
+    <div className={`${card} space-y-3`}>
+      <div className="text-sm font-bold text-white">تجربة المقدّم المتحدث (HeyGen Avatar IV · $0.05/ث)</div>
+      <div className="text-[11px] text-slate-400">صورة شخص من الصدر لفوق، وجهه واضح ومواجه للكاميرا (بموافقته). يُولَّد الصوت بأصواتنا ثم تتحرك الصورة وتتكلم به.</div>
+      <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+        <label className="block">
+          <span className="text-xs font-semibold text-slate-300">الجملة (قصيرة، أقل من 200 حرف)</span>
+          <input value={text} onChange={e => setText(e.target.value.slice(0, 200))} className={field} />
+        </label>
+        <label className="block">
+          <span className="text-xs font-semibold text-slate-300">الصوت</span>
+          <select value={voice} onChange={e => setVoice(e.target.value)} className={field}>
+            {voices.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+      </div>
+      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => pick(e.target.files?.[0])} className="block text-xs text-slate-300" />
+      {photo && <img src={photo} alt="" className="h-28 rounded-lg border border-slate-700" />}
+      <button
+        type="button"
+        onClick={start}
+        disabled={!photo || text.trim().length < 5 || test?.status === 'working'}
+        className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-bold disabled:opacity-50"
+      >
+        {test?.status === 'working' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} جرّب المقدّم
+      </button>
+      {error && <div className="text-xs text-rose-300">{error}</div>}
+      {test && (
+        <div className="space-y-2">
+          <div className="text-xs text-slate-300">
+            {test.status === 'working' ? 'قيد العمل… (دقيقة إلى بضع دقائق)' : test.status === 'completed' ? 'جاهز' : 'فشل'}
+            {test.seconds ? ` · ${test.seconds} ث صوت` : ''}{test.costUsd ? ` · ${usd(test.costUsd)}` : ''}
+          </div>
+          {test.error && <div className="text-xs text-rose-300">{test.error}</div>}
+          {test.status === 'completed' && <video src={`/api/admin/auto-reel/avatar-test/${test.id}/video.mp4`} controls autoPlay playsInline className="max-h-[60vh] rounded-xl bg-black" />}
+          {test.attempts.length > 0 && (
+            <div className="text-[11px] text-slate-400 bg-slate-950/50 border border-slate-800 rounded-lg p-2 space-y-1" dir="ltr">
+              {test.attempts.map((a, i) => <div key={i}><b className="text-slate-300">{a.shape}</b> → {a.result}</div>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Automatic reels (admin trial): one idea → a plan, voice, pictures and clips by AI → one video of about a minute. */
 export const AutoReelTab: React.FC = () => {
   const [options, setOptions] = useState<Options | null>(null);
@@ -356,6 +449,8 @@ export const AutoReelTab: React.FC = () => {
           </div>
         </div>
       )}
+
+      {options && <AvatarTrial voices={options.voices} />}
 
       <div className={`${card} space-y-2`}>
         <div className="text-sm font-bold text-white">الريلز ({reels.length})</div>

@@ -496,3 +496,124 @@ autoReelRouter.delete('/:id', async (req, res) => {
   await fs.rm(dirOf(id), { recursive: true, force: true });
   res.json({ success: true });
 });
+
+// ---------- Trial: a talking presenter (HeyGen Avatar IV) ----------
+// One photo and one short sentence in the studio's voice, lip-synced by an avatar model. How OpenRouter takes the
+// sound is not documented yet, so the known request shapes are tried in turn (a refused request costs nothing) and
+// every answer is kept, to learn which one works before building presenter scenes into the reels.
+
+const AVATAR_MODEL = () => process.env.AUTO_REEL_AVATAR_MODEL || 'heygen/avatar-iv';
+const avatarDir = () => path.join(root(), 'avatar-tests');
+
+interface AvatarTest {
+  id: string;
+  createdAt: string;
+  text: string;
+  voice: string;
+  status: 'working' | 'completed' | 'failed';
+  attempts: { shape: string; result: string }[];
+  shape?: string;           // the request shape that was accepted
+  videoId?: string;
+  seconds?: number;
+  costUsd?: number;
+  error?: string;
+}
+
+const avatarFile = (id: string, name: string) => path.join(avatarDir(), `${id}-${name}`);
+async function readAvatar(id: string): Promise<AvatarTest | null> {
+  try { return JSON.parse(await fs.readFile(avatarFile(id, 'test.json'), 'utf8')); } catch { return null; }
+}
+async function writeAvatar(t: AvatarTest) {
+  await fs.mkdir(avatarDir(), { recursive: true });
+  await fs.writeFile(avatarFile(t.id, 'test.json'), JSON.stringify(t, null, 1));
+}
+
+async function runAvatarTest(t: AvatarTest, photoDataUrl: string) {
+  try {
+    if (!speak) throw new Error('محرك الصوت غير متاح');
+    const wav = await speak(t.text, t.voice, 'Natural, friendly presenter explaining to the camera');
+    if (!wav) throw new Error('لم يرجع صوت');
+    await fs.writeFile(avatarFile(t.id, 'voice.wav'), wav);
+    t.seconds = Math.round(speechIntervals(wav).duration * 100) / 100;
+    await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', `${t.id}-voice.wav`, '-c:a', 'libmp3lame', '-b:a', '128k', `${t.id}-voice.mp3`], avatarDir(), { timeoutMs: 60_000, duration: 0 });
+    const mp3 = `data:audio/mpeg;base64,${(await fs.readFile(avatarFile(t.id, 'voice.mp3'))).toString('base64')}`;
+    const photo = { type: 'image_url', image_url: { url: photoDataUrl } };
+    const common = { model: AVATAR_MODEL(), prompt: 'The person speaks naturally to the camera, with subtle head movement and natural expressions.', resolution: '720p', aspect_ratio: '9:16' };
+    const shapes: [string, Record<string, unknown>][] = [
+      ['input_references: photo + input_audio{data}', { input_references: [photo, { type: 'input_audio', input_audio: { data: mp3 } }] }],
+      ['input_references: photo + input_audio{data,format}', { input_references: [photo, { type: 'input_audio', input_audio: { data: mp3.split(',')[1], format: 'mp3' } }] }],
+      ['frame_images photo + input_references audio', { frame_images: [{ ...photo, frame_type: 'first_frame' }], input_references: [{ type: 'input_audio', input_audio: { data: mp3 } }] }],
+      ['input_references photo + provider audio passthrough', { input_references: [photo], provider: { options: { heygen: { parameters: { audio_url: mp3 } } } } }],
+    ];
+    for (const [shape, extra] of shapes) {
+      const res = await fetch(`${base()}/videos`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...common, ...extra }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const answer: any = await res.json().catch(() => ({}));
+      if (res.ok && typeof answer.id === 'string') {
+        t.attempts.push({ shape, result: `accepted (${answer.id})` });
+        t.shape = shape;
+        t.videoId = answer.id;
+        break;
+      }
+      t.attempts.push({ shape, result: `${res.status}: ${String(answer?.error?.message || JSON.stringify(answer)).slice(0, 300)}` });
+      await writeAvatar(t);
+    }
+    await writeAvatar(t);
+    if (!t.videoId) throw new Error('رُفضت كل أشكال الطلب، راجع السجل');
+
+    const started = Date.now();
+    while (Date.now() - started < CLIP_WAIT_MS) {
+      await sleep(10_000);
+      const r = await fetch(`${base()}/videos/${t.videoId}`, { headers: { Authorization: `Bearer ${key()}` }, signal: AbortSignal.timeout(20_000) }).catch(() => null);
+      const d: any = r?.ok ? await r.json().catch(() => null) : null;
+      if (!d) continue;
+      if (d.status === 'completed') {
+        await saveVideo(t.videoId, d, avatarFile(t.id, 'video.mp4'));
+        const cost = Number(d.usage?.cost);
+        t.costUsd = Number.isFinite(cost) && cost > 0 ? cost : undefined;
+        t.status = 'completed';
+        return;
+      }
+      if (['failed', 'cancelled', 'expired'].includes(d.status)) throw new Error(`فشل التوليد: ${String(d.error?.message || d.error || d.status).slice(0, 300)}`);
+    }
+    throw new Error('تأخر أكثر من 20 دقيقة');
+  } catch (error: any) {
+    t.status = 'failed';
+    t.error = String(error?.message || error).slice(0, 400);
+  } finally {
+    running.delete(t.id);
+    await writeAvatar(t).catch(() => {});
+  }
+}
+
+autoReelRouter.post('/avatar-test', async (req, res) => {
+  if (!key()) return res.status(503).json({ success: false, error: 'مفتاح OpenRouter غير مضبوط على الخادم' });
+  const photo = String(req.body?.imageDataUrl || '');
+  if (!/^data:image\/(png|jpe?g|webp);base64,/.test(photo) || photo.length > 6_000_000) return res.status(400).json({ success: false, error: 'ارفع صورة (PNG أو JPG، أقل من 4 ميغابايت)' });
+  const text = String(req.body?.text || '').trim().slice(0, 200);
+  if (text.length < 5) return res.status(400).json({ success: false, error: 'اكتب جملة قصيرة' });
+  const voice = VOICES.some(v => v.id === req.body?.voice) ? req.body.voice : VOICES[0].id;
+  const t: AvatarTest = { id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), text, voice, status: 'working', attempts: [] };
+  await writeAvatar(t);
+  running.add(t.id);
+  runAvatarTest(t, photo);
+  res.json({ success: true, test: t });
+});
+
+autoReelRouter.get('/avatar-test/:id', async (req, res) => {
+  const id = safeId(req.params.id);
+  const t = id ? await readAvatar(id) : null;
+  if (!t) return res.status(404).json({ success: false, error: 'التجربة غير موجودة' });
+  res.json({ success: true, test: t.status === 'working' && !running.has(t.id) ? { ...t, status: 'failed', error: 'توقف الخادم أثناء العمل' } : t });
+});
+
+autoReelRouter.get('/avatar-test/:id/:name', async (req, res) => {
+  const id = safeId(req.params.id);
+  const name = String(req.params.name);
+  if (!id || !['video.mp4', 'voice.wav'].includes(name)) return res.status(404).end();
+  res.sendFile(avatarFile(id, name), error => { if (error && !res.headersSent) res.status(404).end(); });
+});
