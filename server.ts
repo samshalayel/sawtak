@@ -71,6 +71,8 @@ app.use(loadUser);
 app.use(serviceGate);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
+// The presenter trial's voice, fetched by the avatar model (see server/auto-reel.ts)
+app.get('/api/avatar-audio/:file', (await import('./server/auto-reel.ts')).avatarAudioPublic);
 app.use('/api/motion-stats', motionStatsRouter);
 
 const generationLimiter = createRateLimiter(() => getSettings().generationsPerMinute, 60 * 1000);

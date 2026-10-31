@@ -528,7 +528,7 @@ async function writeAvatar(t: AvatarTest) {
   await fs.writeFile(avatarFile(t.id, 'test.json'), JSON.stringify(t, null, 1));
 }
 
-async function runAvatarTest(t: AvatarTest, photoDataUrl: string) {
+async function runAvatarTest(t: AvatarTest, photoDataUrl: string, publicBase: string) {
   try {
     if (!speak) throw new Error('محرك الصوت غير متاح');
     const wav = await speak(t.text, t.voice, 'Natural, friendly presenter explaining to the camera');
@@ -539,11 +539,10 @@ async function runAvatarTest(t: AvatarTest, photoDataUrl: string) {
     const mp3 = `data:audio/mpeg;base64,${(await fs.readFile(avatarFile(t.id, 'voice.mp3'))).toString('base64')}`;
     const photo = { type: 'image_url', image_url: { url: photoDataUrl } };
     const common = { model: AVATAR_MODEL(), prompt: 'The person speaks naturally to the camera, with subtle head movement and natural expressions.', resolution: '720p', aspect_ratio: '9:16' };
+    // OpenRouter takes the sound as an audio_url reference (learnt from its refusals); inline first, then a public link
     const shapes: [string, Record<string, unknown>][] = [
-      ['input_references: photo + input_audio{data}', { input_references: [photo, { type: 'input_audio', input_audio: { data: mp3 } }] }],
-      ['input_references: photo + input_audio{data,format}', { input_references: [photo, { type: 'input_audio', input_audio: { data: mp3.split(',')[1], format: 'mp3' } }] }],
-      ['frame_images photo + input_references audio', { frame_images: [{ ...photo, frame_type: 'first_frame' }], input_references: [{ type: 'input_audio', input_audio: { data: mp3 } }] }],
-      ['input_references photo + provider audio passthrough', { input_references: [photo], provider: { options: { heygen: { parameters: { audio_url: mp3 } } } } }],
+      ['audio_url (inline data URL)', { input_references: [photo, { type: 'audio_url', audio_url: { url: mp3 } }] }],
+      ['audio_url (public link)', { input_references: [photo, { type: 'audio_url', audio_url: { url: `${publicBase}/api/avatar-audio/${t.id}.mp3` } }] }],
     ];
     for (const [shape, extra] of shapes) {
       const res = await fetch(`${base()}/videos`, {
@@ -600,7 +599,7 @@ autoReelRouter.post('/avatar-test', async (req, res) => {
   const t: AvatarTest = { id: crypto.randomBytes(8).toString('hex'), createdAt: new Date().toISOString(), text, voice, status: 'working', attempts: [] };
   await writeAvatar(t);
   running.add(t.id);
-  runAvatarTest(t, photo);
+  runAvatarTest(t, photo, `${req.protocol}://${req.get('host')}`);
   res.json({ success: true, test: t });
 });
 
@@ -617,3 +616,15 @@ autoReelRouter.get('/avatar-test/:id/:name', async (req, res) => {
   if (!id || !['video.mp4', 'voice.wav'].includes(name)) return res.status(404).end();
   res.sendFile(avatarFile(id, name), error => { if (error && !res.headersSent) res.status(404).end(); });
 });
+
+/**
+ * The trial's voice as a public link for an hour, for models that download the sound themselves. Mounted outside
+ * /api/admin (no sign-in): the name is the trial's random 16-character id, and only that test's MP3 is served.
+ */
+export async function avatarAudioPublic(req: express.Request, res: express.Response) {
+  const id = safeId(String(req.params.file || '').replace(/\.mp3$/, ''));
+  const file = id ? avatarFile(id, 'voice.mp3') : null;
+  const stat = file ? await fs.stat(file).catch(() => null) : null;
+  if (!file || !stat || Date.now() - stat.mtimeMs > 60 * 60_000) return res.status(404).end();
+  res.type('audio/mpeg').sendFile(file);
+}
