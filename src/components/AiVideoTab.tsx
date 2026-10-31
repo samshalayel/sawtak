@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Film, Loader2, Trash2 } from 'lucide-react';
 import { api, card, usd } from './adminShared';
 import { AddToGalleryButton } from './GalleryShare';
@@ -88,15 +88,37 @@ export const AiVideoTab: React.FC = () => {
     loadLibrary();
   }, [loadLibrary]);
 
+  // Settings to bring back with the model ("try again" on a clip): applied instead of the model's defaults
+  const retrying = useRef<Job | null>(null);
+
   // A new model: its own lowest resolution, vertical when possible, and a short clip
   useEffect(() => {
     if (!model) return;
-    setResolution(model.resolutions[0]);
-    setAspect(model.aspectRatios.includes('9:16') ? '9:16' : model.aspectRatios[0]);
-    setDuration(model.durations.find(d => d >= 5) ?? model.durations[0]);
-    setSound(false);
+    const back = retrying.current?.model === model.id ? retrying.current : null;
+    retrying.current = null;
+    setResolution(back && model.resolutions.includes(back.resolution) ? back.resolution : model.resolutions[0]);
+    setAspect(back && model.aspectRatios.includes(back.aspectRatio) ? back.aspectRatio : model.aspectRatios.includes('9:16') ? '9:16' : model.aspectRatios[0]);
+    setDuration(back && model.durations.includes(back.duration) ? back.duration : model.durations.find(d => d >= 5) ?? model.durations[0]);
+    setSound(Boolean(back?.sound && model.audio));
     if (!model.firstFrame) setImage(null);
   }, [model]);
+
+  /** The form filled with a clip's settings, to change the words and ask again. */
+  const retry = (j: Job) => {
+    if (!models?.some(m => m.id === j.model)) return setError('النموذج لم يعد في القائمة');
+    retrying.current = j;
+    setPrompt(j.prompt);
+    if (j.model === modelId) {
+      // Same model: the effect will not run again, so apply here
+      const m = model!;
+      setResolution(m.resolutions.includes(j.resolution) ? j.resolution : m.resolutions[0]);
+      setAspect(m.aspectRatios.includes(j.aspectRatio) ? j.aspectRatio : m.aspectRatios[0]);
+      setDuration(m.durations.includes(j.duration) ? j.duration : m.durations[0]);
+      setSound(Boolean(j.sound && m.audio));
+      retrying.current = null;
+    } else setModelId(j.model);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Follow the clip being made until it is finished
   useEffect(() => {
@@ -274,6 +296,7 @@ export const AiVideoTab: React.FC = () => {
               <div className="flex gap-3 text-[11px]">
                 {j.file && <a href={`/api/admin/ai-video/jobs/${j.id}/file?download=1`} className="flex items-center gap-1 text-slate-300 hover:text-amber-300"><Download className="w-3 h-3" /> تحميل</a>}
                 {j.file && <AddToGalleryButton kind="video" source="ai-video" itemRef={j.id} defaultTitle={j.prompt} compact />}
+                {j.status !== 'completed' && done(j) && <button type="button" onClick={() => retry(j)} className="text-amber-300 hover:text-amber-200">أعد المحاولة</button>}
                 <button type="button" onClick={() => remove(j.id)} className="flex items-center gap-1 text-slate-400 hover:text-rose-300"><Trash2 className="w-3 h-3" /> حذف</button>
               </div>
             </div>

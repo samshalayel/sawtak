@@ -4,6 +4,7 @@
 // scene later. Every price is shown before generating, and a clip that would cost more than what is left of the
 // key's spending cap (or more than AI_VIDEO_MAX_USD, default 3) is refused.
 import express from 'express';
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { openRouterStats } from './openrouter-stats.ts';
@@ -123,6 +124,18 @@ const metaFile = (id: string) => path.join(dir(), `${id}.json`);
 const videoFile = (id: string) => path.join(dir(), `${id}.mp4`);
 // Finished clips are in the media storage (server/storage.ts); only the small job files stay on the server
 const videoKey = (id: string) => `ai-video/${id}.mp4`;
+/** A provider's refusal in plain Arabic, followed by its own words (kept for the record). */
+export function explainRefusal(reason: string): string {
+  const r = reason.toLowerCase();
+  const why =
+    /content policy|safety|moderation|prohibited|not allowed|violat|blocked/.test(r) ? 'رفض النموذج الوصف لأنه يخالف سياسة المحتوى عنده. جرّب صياغة أخرى (بدون أشخاص حقيقيين أو عنف أو ماركات) أو نموذجاً آخر.'
+    : /frame_images|first_frame|image/.test(r) && /required|need|must/.test(r) ? 'هذا النموذج يحتاج صورة بداية.'
+    : /insufficient|credit|balance|limit/.test(r) ? 'رصيد OpenRouter أو حد صرف المفتاح لا يكفي.'
+    : /rate|too many|429/.test(r) ? 'ضغط على النموذج الآن، حاول بعد قليل.'
+    : 'رفض OpenRouter الطلب.';
+  return `${why} (${reason})`;
+}
+
 const terminal = (s: VideoJob['status']) => s === 'completed' || s === 'failed' || s === 'cancelled' || s === 'expired';
 
 async function readJob(id: string): Promise<VideoJob | null> {
@@ -191,8 +204,13 @@ aiVideoRouter.post('/generate', async (req, res) => {
       console.error('Video request refused:', submit.status, JSON.stringify(answer).slice(0, 400));
       const reason = String(answer?.error?.message || answer?.error || submit.status).slice(0, 200);
       if (!image && /frame_images|first_frame/i.test(reason)) needImage.add(model.id);
+      // Kept in the library like any clip, so the reason survives the page and the container's logs
+      await writeJob({
+        id: `refused-${crypto.randomBytes(6).toString('hex')}`, model: model.id, modelName: model.name, prompt, resolution, aspectRatio, duration,
+        sound, image, estimateUsd: 0, createdAt: new Date().toISOString(), status: 'failed', error: explainRefusal(reason),
+      }).catch(() => {});
       // Our own 4xx/500, not 502: a gateway in front of the site may swap a 502 for its own page and hide the reason
-      return res.status(submit.status >= 400 && submit.status < 500 ? 400 : 500).json({ success: false, error: `رفض OpenRouter الطلب: ${reason}` });
+      return res.status(submit.status >= 400 && submit.status < 500 ? 400 : 500).json({ success: false, error: explainRefusal(reason) });
     }
     const job: VideoJob = {
       id, model: model.id, modelName: model.name, prompt, resolution, aspectRatio, duration, sound, image, estimateUsd,
